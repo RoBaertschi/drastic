@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdarg.h>
 #include <limine.h>
 
 #pragma GCC diagnostic push
@@ -18,8 +19,6 @@
 // Set the base revision to 6, this is recommended as this is the latest
 // base revision described by the Limine boot protocol specification.
 // See specification for further info.
-
-#define LIMINE_REQUEST USED SECTION(".limine_requests")
 
 LIMINE_REQUEST
 static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(6);
@@ -53,7 +52,16 @@ void kmain(void) {
         hcf();
     }
 
-    kpanic_set_output_stream(serial_stream_make(SERIAL_COM1));
+    Stream serial_stream = serial_stream_make(SERIAL_COM1);
+    kpanic_set_output_stream(serial_stream);
+    format_set_output_stream(serial_stream);
+
+    format(serial_stream, STR("Test %p ptr\n\nHi %i %u\n%s"),
+           &serial_stream,
+           (Int)-44,
+           (Uint)55, STR("Test %p ptr\n\nHi %i %u\n"));
+
+    printf("%p %S\n", &serial_stream, "HIIIIIII\n");
 
     serial_write_string(SERIAL_COM1, STR("Hello Kernel World!\n"));
 
@@ -83,6 +91,8 @@ void kmain(void) {
             fb_ptr[y * (framebuffer->pitch / 4) + x] = (nY << 8) | nX;
         }
     }
+
+    // Int volatile test = 1 / 0;
 
     // We're done, just hang...
     hcf();

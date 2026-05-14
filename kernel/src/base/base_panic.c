@@ -23,6 +23,20 @@ internal NO_RETURN void kpanic(String panic_message) {
     hcf();
 }
 
+COLD
+internal void _kassert_trigger_assertion(char const *message) {
+    stream_write_string(_panic_output_stream, STR("KPANIC: ASSERTION FAILED: "));
+    stream_write_string(_panic_output_stream, string_from_char(message));
+    stream_write_string(_panic_output_stream, STR("\n"));
+    hcf();
+}
+
+internal void kassert_message(bool assertion, char const *message) {
+    if (!assertion) {
+        _kassert_trigger_assertion(message);
+    }
+}
+
 internal void kpanic_set_output_stream(Stream s) {
     _panic_output_stream = s;
 }

@@ -27,7 +27,12 @@ typedef intptr_t  Intptr;
 #define SECTION(s) __attribute__((section(s)))
 #define USED __attribute__((used))
 #define PACKED __attribute__((packed))
+#define COLD __attribute__((cold))
+#define LIMINE_REQUEST USED SECTION(".limine_requests")
 
 #define size_of(T) ((Int)sizeof(T))
 
 #define count_of(a) (size_of(a) / size_of(a[0]))
+
+#define kassert(condition) kassert_message((condition), #condition)
+internal void kassert_message(bool assertion, char const *message);

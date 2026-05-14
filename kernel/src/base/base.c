@@ -2,5 +2,6 @@
 #include "base_bytes.c"
 #include "base_string.c"
 #include "base_stream.c"
+#include "base_format.c"
 #include "base_panic.c"
 #include "base_asm.c"

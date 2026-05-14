@@ -56,16 +56,18 @@ system_idt_interrupt_stub:
 
 .macro ISR_NO_ERR vector
 .global system_idt_isr_stub_\vector
+.align 16
 system_idt_isr_stub_\vector:
-    pushq 0
-    pushq \vector
+    pushq $0
+    pushq $\vector
     jmp system_idt_interrupt_stub
 .endm
 
 .macro ISR_ERR vector
 .global system_idt_isr_stub_\vector
+.align 16
 system_idt_isr_stub_\vector:
-    pushq \vector
+    pushq $\vector
     jmp system_idt_interrupt_stub
 .endm
 
@@ -78,26 +80,26 @@ ISR_NO_ERR 5      /* #BR Bound Range Exceeded */
 ISR_NO_ERR 6      /* #UD Invalid Opcode */
 ISR_NO_ERR 7      /* #NM Device Not Available */
 
-ISR_ERR   8      /* #DF Double Fault */
+ISR_ERR    8      /* #DF Double Fault */
 
 ISR_NO_ERR 9      /* legacy Coprocessor Segment Overrun */
 
-ISR_ERR   10     /* #TS Invalid TSS */
-ISR_ERR   11     /* #NP Segment Not Present */
-ISR_ERR   12     /* #SS Stack Segment Fault */
-ISR_ERR   13     /* #GP General Protection Fault */
-ISR_ERR   14     /* #PF Page Fault */
+ISR_ERR    10     /* #TS Invalid TSS */
+ISR_ERR    11     /* #NP Segment Not Present */
+ISR_ERR    12     /* #SS Stack Segment Fault */
+ISR_ERR    13     /* #GP General Protection Fault */
+ISR_ERR    14     /* #PF Page Fault */
 
 ISR_NO_ERR 15     /* reserved */
 ISR_NO_ERR 16     /* #MF x87 Floating-Point Exception */
 
-ISR_ERR   17     /* #AC Alignment Check */
+ISR_ERR    17     /* #AC Alignment Check */
 
 ISR_NO_ERR 18     /* #MC Machine Check */
 ISR_NO_ERR 19     /* #XM/#XF SIMD Floating-Point Exception */
 ISR_NO_ERR 20     /* #VE Virtualization Exception */
 
-ISR_ERR   21     /* #CP Control Protection Exception */
+ISR_ERR    21     /* #CP Control Protection Exception */
 
 ISR_NO_ERR 22
 ISR_NO_ERR 23
@@ -107,9 +109,20 @@ ISR_NO_ERR 26
 ISR_NO_ERR 27
 ISR_NO_ERR 28     /* #HV Hypervisor Injection Exception */
 
-ISR_ERR   29     /* #VC VMM Communication Exception */
-ISR_ERR   30     /* #SX Security Exception */
+ISR_ERR    29     /* #VC VMM Communication Exception */
+ISR_ERR    30     /* #SX Security Exception */
 
 ISR_NO_ERR 31
+
+.altmacro
+
+.set vec, 32
+
+.rept 224
+    ISR_NO_ERR %vec
+    .set vec, vec + 1
+.endr
+
+.noaltmacro
 
 .section .note.GNU-stack,"",@progbits

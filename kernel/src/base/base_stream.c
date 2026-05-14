@@ -36,8 +36,18 @@ internal STREAM_FUNCTION(stream_no_op_func) {
 
 #define STREAM_NO_OP (Stream){ .func = stream_no_op_func };
 
+internal Int stream_write(Stream s, Bytes bytes) {
+    return s.func(s.data, STREAM_OP_WRITE, bytes);
+}
+
 internal Int stream_write_string(Stream s, String str) {
     Bytes bytes = { .ptr = (U8*)str.ptr, .len = str.len };
+
+    return s.func(s.data, STREAM_OP_WRITE, bytes);
+}
+
+internal Int stream_write_byte(Stream s, U8 byte) {
+    Bytes bytes = { .ptr = &byte, .len = 1 };
 
     return s.func(s.data, STREAM_OP_WRITE, bytes);
 }

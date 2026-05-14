@@ -7,6 +7,9 @@
 // rpl = requested privilage level
 #define SYSTEM_GDT_SEGMENT_SELECTOR(index, rpl) ((U64)(((index) << 3) | (rpl)))
 
+#define SYSTEM_GDT_KDATA_SELECTOR SYSTEM_GDT_SEGMENT_SELECTOR(SYSTEM_GDT_KDATA_SEGMENT, 0)
+#define SYSTEM_GDT_KCODE_SELECTOR SYSTEM_GDT_SEGMENT_SELECTOR(SYSTEM_GDT_KCODE_SEGMENT, 0)
+
 #define SYSTEM_GDT_SEGMENT_COUNT 5
 
 // This constant is dangerous and only true for data and code segment, system segments are 16 bytes
@@ -118,13 +121,9 @@ internal void system_gdt_load(U16 limit, U64 base) {
 
 
 internal void system_gdt_setup(void) {
-    asm_disable_interrupts();
-
     for (Int i = 0; i < SYSTEM_GDT_SEGMENT_COUNT; i++) {
         system_gdt_entry_encode(&system_gdt.data[i * 8], system_gdt.entries[i]);
     }
 
     system_gdt_load((U16)size_of(system_gdt.data) - 1, (Uintptr)&system_gdt.data);
-
-    asm_enable_interrupts();
 }

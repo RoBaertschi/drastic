@@ -80,13 +80,13 @@ internal void serial_write_blocking(U16 port, U8 data) {
 
 internal void serial_write_string(U16 port, String str) {
     for (Int i = 0; i < str.len; i++) {
-        serial_write_blocking(port, str.ptr[i]);
+        serial_write_blocking(port, string_get(str, i));
     }
 }
 
 internal void serial_write_bytes(U16 port, Bytes buffer) {
     for (Int i = 0; i < buffer.len; i++) {
-        serial_write_blocking(port, buffer.ptr[i]);
+        serial_write_blocking(port, bytes_get(buffer, i));
     }
 }
 
@@ -104,7 +104,7 @@ internal STREAM_FUNCTION(serial_stream_func) {
         while(!serial_read_available(port));
 
         while (serial_read_available(port) && n < buffer.len) {
-            buffer.ptr[n]  = serial_inb(port);
+            bytes_set(buffer, n, serial_inb(port));
             n             += 1;
         }
         return n;

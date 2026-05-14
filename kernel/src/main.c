@@ -3,11 +3,25 @@
 #include <stdbool.h>
 #include <limine.h>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#include "../cc-runtime/src/cc-runtime.c"
+#pragma GCC diagnostic pop
+
+#include "memory.c"
+
+#include "base/base.c"
+#include "serial/serial.c"
+#include "system/system.c"
+
 // Set the base revision to 6, this is recommended as this is the latest
 // base revision described by the Limine boot protocol specification.
 // See specification for further info.
 
-__attribute__((used, section(".limine_requests")))
+#define LIMINE_REQUEST USED SECTION(".limine_requests")
+
+LIMINE_REQUEST
 static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(6);
 
 // The Limine requests can be placed anywhere, but it is important that
@@ -15,7 +29,7 @@ static volatile uint64_t limine_base_revision[] = LIMINE_BASE_REVISION(6);
 // be made volatile or equivalent, _and_ they should be accessed at least
 // once or marked as used with the "used" attribute as done here.
 
-__attribute__((used, section(".limine_requests")))
+LIMINE_REQUEST
 static volatile struct limine_framebuffer_request framebuffer_request = {
     .id = LIMINE_FRAMEBUFFER_REQUEST_ID,
     .revision = 0
@@ -24,29 +38,27 @@ static volatile struct limine_framebuffer_request framebuffer_request = {
 // Finally, define the start and end markers for the Limine requests.
 // These can also be moved anywhere, to any .c file, as seen fit.
 
-__attribute__((used, section(".limine_requests_start")))
+USED SECTION(".limine_requests_start")
 static volatile uint64_t limine_requests_start_marker[] = LIMINE_REQUESTS_START_MARKER;
 
-__attribute__((used, section(".limine_requests_end")))
+USED SECTION(".limine_requests_end")
 static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARKER;
-
-// Halt and catch fire function.
-static void hcf(void) {
-    for (;;) {
-#if defined (__x86_64__)
-        asm ("hlt");
-#elif defined (__aarch64__) || defined (__riscv)
-        asm ("wfi");
-#elif defined (__loongarch64)
-        asm ("idle 0");
-#endif
-    }
-}
 
 // The following will be our kernel's entry point.
 // If renaming kmain() to something else, make sure to change the
 // linker script accordingly.
 void kmain(void) {
+    if (!serial_init(SERIAL_COM1)) {
+        // TODO(robin): support operation without serial
+        hcf();
+    }
+
+    kpanic_set_output_stream(serial_stream_make(SERIAL_COM1));
+
+    serial_write_string(SERIAL_COM1, STR("Hello Kernel World!\n"));
+
+    system_setup();
+
     // Ensure the bootloader actually understands our base revision (see spec).
     if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false) {
         hcf();

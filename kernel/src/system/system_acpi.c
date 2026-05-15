@@ -102,10 +102,15 @@ internal void system_acpi_setup(void) {
     };
 }
 
+internal Int system_acpi_sdt_count(void) {
+    return ((Int)system_acpi.sdt->length - size_of(System_Acpi_Sdt_Header)) /
+            (system_acpi.use_extended ? 8 : 4);
+}
+
 internal Uintptr system_acpi_sdt_get(Int item) {
     kassert(system_acpi.rsdp != NULL);
 
-    Int item_count = ((Int)system_acpi.sdt->length - size_of(System_Acpi_Sdt_Header)) / (system_acpi.use_extended ? 8 : 4);
+    Int item_count = system_acpi_sdt_count();
     kassert(0 <= item && item < item_count);
 
     if (system_acpi.use_extended) {

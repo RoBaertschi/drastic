@@ -24,18 +24,29 @@ global String system_paging_memmap_string[] = {
     [LIMINE_MEMMAP_RESERVED_MAPPED]        = STR("RESERVED_MAPPED"),
 };
 
+typedef struct System_Paging {
+    System_Physical_Allocator pa_sentinel; // sentinel is a global so that it has a stable address
+
+    struct System_Physical_Allocator *first;
+    struct System_Physical_Allocator *first_16mb;
+    struct System_Physical_Allocator *first_4gb;
+    struct System_Physical_Allocator *last;
+    struct System_Physical_Allocator *last_16mb;
+    struct System_Physical_Allocator *last_4gb;
+} System_Paging;
+
+global System_Paging system_paging;
+
 internal void system_paging_setup(U64 stack_top) {
     kassert(system_paging_memmap_request.response != NULL);
 
-    System_Physical_Allocator sentinel = {0};
+    struct System_Physical_Allocator *first      = &system_paging.pa_sentinel;
+    struct System_Physical_Allocator *first_16mb = &system_paging.pa_sentinel;
+    struct System_Physical_Allocator *first_4gb  = &system_paging.pa_sentinel;
 
-    struct System_Physical_Allocator *first      = &sentinel;
-    struct System_Physical_Allocator *first_16mb = &sentinel;
-    struct System_Physical_Allocator *first_4gb  = &sentinel;
-
-    struct System_Physical_Allocator *last      = &sentinel;
-    struct System_Physical_Allocator *last_16mb = &sentinel;
-    struct System_Physical_Allocator *last_4gb  = &sentinel;
+    struct System_Physical_Allocator *last      = &system_paging.pa_sentinel;
+    struct System_Physical_Allocator *last_16mb = &system_paging.pa_sentinel;
+    struct System_Physical_Allocator *last_4gb  = &system_paging.pa_sentinel;
 
     U64 hhdm_offset = system_hhdm_request.response->offset;
 
@@ -104,4 +115,12 @@ internal void system_paging_setup(U64 stack_top) {
                     stack_top);
         }
     }
+
+    system_paging.first      = first;
+    system_paging.first_16mb = first_16mb;
+    system_paging.first_4gb  = first_4gb;
+
+    system_paging.last      = last;
+    system_paging.last_16mb = last_16mb;
+    system_paging.last_4gb  = last_4gb;
 }

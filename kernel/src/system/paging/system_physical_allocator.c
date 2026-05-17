@@ -5,6 +5,13 @@
 ///  One physical page allocator handles exactly one range of physical addresses
 /// Traps:
 ///  None of the returned pages are zeroed, this has to be done in the VMM.
+/// Future improvements:
+///  We could maybe switch to a buddy allocator at some point,
+///   but I don't think that makes sense as long as we don't need physical pages
+///   next to each other.
+///  Make the implementation atomic for smp support.
+///   Shouldn't be to hard, it should probably atomically fetch und update the
+///   stack_top variable. Edits should probably only happen based on that variable.
 
 typedef struct System_Physical_Allocator {
     struct System_Physical_Allocator *next;
@@ -14,7 +21,7 @@ typedef struct System_Physical_Allocator {
     Int     size;
     Int     stack_top;
     U64     *pages_bitmap; // bitmask that says if a page is used or not
-    U32     *pages_stack;   // stack for O(1) alloc and free
+    U32     *pages_stack;  // stack for O(1) alloc and free
     Uintptr address_base;
 } System_Physical_Allocator;
 

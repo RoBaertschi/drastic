@@ -47,6 +47,9 @@ static volatile uint64_t limine_requests_end_marker[] = LIMINE_REQUESTS_END_MARK
 // If renaming kmain() to something else, make sure to change the
 // linker script accordingly.
 void kmain(void) {
+    void *frame_ptr;
+    asm volatile("mov %%rsp, %0" : "=r"(frame_ptr));
+
     if (!serial_init(SERIAL_COM1)) {
         // TODO(robin): support operation without serial
         hcf();
@@ -55,6 +58,11 @@ void kmain(void) {
     Stream serial_stream = serial_stream_make(SERIAL_COM1);
     kpanic_set_output_stream(serial_stream);
     format_set_output_stream(serial_stream);
+
+    printf("\n\n\n");
+
+    printf("frame_ptr = %p\n", frame_ptr);
+
 
     format(serial_stream, STR("Test %p ptr\n\nHi %i %u\n%s"),
            &serial_stream,
@@ -65,7 +73,7 @@ void kmain(void) {
 
     serial_write_string(SERIAL_COM1, STR("Hello Kernel World!\n"));
 
-    system_setup();
+    system_setup((U64)(Uintptr) frame_ptr);
 
     // Ensure the bootloader actually understands our base revision (see spec).
     if (LIMINE_BASE_REVISION_SUPPORTED(limine_base_revision) == false) {
@@ -93,6 +101,8 @@ void kmain(void) {
     }
 
     // Int volatile test = 1 / 0;
+
+    for(;;);
 
     // We're done, just hang...
     hcf();

@@ -145,6 +145,16 @@ void system_idt_interrupt_handler(System_Idt_Interrupt_Stack_Frame *stack_frame)
                stack_frame->vector,
                stack_frame->error_code);
     }
+
+    if (stack_frame->vector == 14) {
+        U64 cr2 = 0;
+        asm volatile(
+            "movq %%cr2,%0"
+            : "=r"(cr2)
+        );
+        printf("cr2: %xU\n", cr2);
+    }
+
     printf("r15: %xU\n", stack_frame->r15);
     printf("r14: %xU\n", stack_frame->r14);
     printf("r13: %xU\n", stack_frame->r13);

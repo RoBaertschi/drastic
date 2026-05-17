@@ -9,7 +9,7 @@ internal U8 format_digit(U64 value) {
 }
 
 internal void format_number(Stream output, U64 value, bool is_signed, U8 base) {
-    U8 buffer_data[25] = {0};
+    U8 buffer_data[96] = {0};
     Bytes buffer       = { .ptr = buffer_data, .len = size_of(buffer_data) };
     Int i              = 0;
     base               = !base ? 10 : base;
@@ -22,6 +22,12 @@ internal void format_number(Stream output, U64 value, bool is_signed, U8 base) {
 
     if (base == 16) {
         Int left_zeros = 16 - i;
+        for (Int j = 0; j < left_zeros; j++) {
+            bytes_set(buffer, i, '0');
+            i += 1;
+        }
+    } else if (base == 2) {
+        Int left_zeros = 64 - i;
         for (Int j = 0; j < left_zeros; j++) {
             bytes_set(buffer, i, '0');
             i += 1;
@@ -85,6 +91,16 @@ internal void vformat(Stream output, String format, va_list args) {
 
         if (ch == 'x') {
             base = 16;
+            i += 1;
+            if (i >= format.len) {
+                stream_write_string(output,
+                        STR("%x(<out of bounds>)"));
+                continue;
+            }
+
+            ch = string_get(format, i);
+        } else if (ch == 'b') {
+            base = 2;
             i += 1;
             if (i >= format.len) {
                 stream_write_string(output,

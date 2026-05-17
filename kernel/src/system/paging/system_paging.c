@@ -50,6 +50,11 @@ internal void system_paging_setup(U64 stack_top) {
         printf("MEMMAP: %xU-%xU(%xU) - %s\n", entry->base, entry->base + entry->length, entry->length, system_paging_memmap_string[entry->type]);
 
         if (entry->type == LIMINE_MEMMAP_USABLE) {
+            if (entry->length <= SYSTEM_PAGE_SIZE) {
+                printf("MEMMAP:  -> skipping to small memory area\n");
+                continue;
+            }
+
             Int required_length = system_pa_calculate_required_size((Int)entry->length / SYSTEM_PAGE_SIZE);
             Int required_pages  = required_length / SYSTEM_PAGE_SIZE + 1;
 

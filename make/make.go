@@ -9,7 +9,18 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 )
+
+func exists(file string, directory bool) bool {
+	stat, err := os.Stat(file)
+	if os.IsNotExist(err) {
+		return false
+	} else if err != nil {
+		return false
+	}
+	return stat.IsDir() == directory
+}
 
 func downloadGziped(ctx context.Context, c *http.Client, doneChan chan downloadResult, url string) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -118,34 +129,66 @@ wait:
 }
 
 func main() {
+	downloadTasks := []struct {
+		url       string
+		directory string
+	}{
+		{
+			url:       "https://github.com/Limine-Bootloader/Limine/releases/latest/download/limine-binary.tar.gz",
+			directory: "limine-binary",
+		},
+		{
+			url:       "https://github.com/osdev0/edk2-ovmf-nightly/releases/latest/download/edk2-ovmf.tar.gz",
+			directory: "edk2-ovmf",
+		},
+	}
+
+	urls := []string{}
+
+	for _, task := range downloadTasks {
+		stat, err := os.Stat(task.directory)
+		if os.IsNotExist(err) {
+			urls = append(urls, task.url)
+			continue
+		} else if err != nil {
+			fmt.Printf("could not stat %s: %v", task.directory, err)
+			continue
+		}
+		if !stat.IsDir() {
+			fmt.Printf("expected %s to be a directory or to not exist\n", task.directory)
+			continue
+		}
+		fmt.Printf("skipping download of %s\n", task.directory)
+	}
+
 	ctx := context.Background()
-	downloads, err := downloadManyGzipedTars(ctx, []string{"https://github.com/Limine-Bootloader/Limine/releases/latest/download/limine-binary.tar.gz"})
-	fmt.Println("downloads done, unzipping")
+	downloads, err := downloadManyGzipedTars(ctx, urls)
 
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("could not start downloads: %v\n", err)
+		os.Exit(1)
 		return
 	}
 
 	for _, d := range downloads {
-		fmt.Println(untar(d.r))
-		// var err error
-		// for err == nil {
-		// 	var header *tar.Header
-		// 	header, err = d.r.Next()
-		// 	if err != nil {
-		// 		fmt.Println("err", err)
-		// 		continue
-		// 	}
-		//
-		// 	data := make([]byte, header.Size)
-		// 	fmt.Println(
-		// 		d.r.Read(data),
-		// 	)
-		//
-		// 	fmt.Println(header)
-		// }
+		err = untar(d.r)
+		if err != nil {
+			fmt.Printf("could not untar %s: %v\n", d.req.URL, err)
+		}
 	}
 
-	fmt.Printf("%#v %#v\n", downloads, err)
+	_, err = os.Stat("limine-binary/limine")
+	if os.IsNotExist(err) {
+		// build it
+		cmd := exec.Command("cc", "-g", "-O2", "-pipe", "-std=c99", "limine-binary/limine.c", "-o", "limine-binary/limine")
+
+		fmt.Println("building limine")
+		err := cmd.Run()
+		if err != nil {
+			fmt.Printf("could not build limine: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Println("skipping build of limine")
+	}
 }

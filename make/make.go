@@ -610,5 +610,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	runQemu()
+	if len(os.Args) <= 1 || os.Args[1] != "no" {
+		runQemu()
+	}
 }

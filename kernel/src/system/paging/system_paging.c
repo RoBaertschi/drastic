@@ -24,29 +24,57 @@ global String system_paging_memmap_string[] = {
     [LIMINE_MEMMAP_RESERVED_MAPPED]        = STR("RESERVED_MAPPED"),
 };
 
+typedef enum System_Physical_Page_Kind {
+    SYSTEM_PHYSICAL_PAGE_NORMAL,
+    SYSTEM_PHYSICAL_PAGE_16MB,
+    SYSTEM_PHYSICAL_PAGE_4GB,
+} System_Physical_Page_Kind;
+
 typedef struct System_Paging {
-    System_Physical_Allocator pa_sentinel; // sentinel is a global so that it has a stable address
+    // sentinel is a global so that it has a stable address
+    // NOTE: sentinel always points to itself, to allow for not handling
+    //       NULL. Instead you detect it if the next ptr == the current ptr
+    System_Physical_Allocator pa_sentinel;
 
     struct System_Physical_Allocator *first;
     struct System_Physical_Allocator *first_16mb;
     struct System_Physical_Allocator *first_4gb;
+
     struct System_Physical_Allocator *last;
     struct System_Physical_Allocator *last_16mb;
     struct System_Physical_Allocator *last_4gb;
+
+    // Pages that are not required to be in the first 16mb should use memory later, save on that
+    struct System_Physical_Allocator *first_non_16mb;
 } System_Paging;
 
 global System_Paging system_paging;
 
+internal bool system_paging_pa_is_sentinel(
+    struct System_Physical_Allocator *pa) {
+
+    return pa == pa->next;
+}
+
 internal void system_paging_setup(U64 stack_top) {
     kassert(system_paging_memmap_request.response != NULL);
 
-    struct System_Physical_Allocator *first      = &system_paging.pa_sentinel;
-    struct System_Physical_Allocator *first_16mb = &system_paging.pa_sentinel;
-    struct System_Physical_Allocator *first_4gb  = &system_paging.pa_sentinel;
+    struct System_Physical_Allocator base = { 0 };
 
-    struct System_Physical_Allocator *last      = &system_paging.pa_sentinel;
-    struct System_Physical_Allocator *last_16mb = &system_paging.pa_sentinel;
-    struct System_Physical_Allocator *last_4gb  = &system_paging.pa_sentinel;
+    // The sentinel always points to itself
+    system_paging.pa_sentinel.next      = &system_paging.pa_sentinel;
+    system_paging.pa_sentinel.next_16mb = &system_paging.pa_sentinel;
+    system_paging.pa_sentinel.next_4gb  = &system_paging.pa_sentinel;
+
+    struct System_Physical_Allocator *first      = &base;
+    struct System_Physical_Allocator *first_16mb = &base;
+    struct System_Physical_Allocator *first_4gb  = &base;
+
+    struct System_Physical_Allocator *last      = &base;
+    struct System_Physical_Allocator *last_16mb = &base;
+    struct System_Physical_Allocator *last_4gb  = &base;
+
+    struct System_Physical_Allocator *first_non_16mb = &system_paging.pa_sentinel;
 
     U64 hhdm_offset = system_hhdm_request.response->offset;
 
@@ -89,6 +117,9 @@ internal void system_paging_setup(U64 stack_top) {
                 last_16mb->next_16mb = current;
                 last_16mb            = current;
             }
+        } else if (system_paging_pa_is_sentinel(first_non_16mb)
+                && entry->type == LIMINE_MEMMAP_USABLE) {
+            first_non_16mb = current;
         }
 
         if (entry->base < GB(4) && entry->base + entry->length < GB(4)) {
@@ -116,11 +147,28 @@ internal void system_paging_setup(U64 stack_top) {
         }
     }
 
-    system_paging.first      = first;
-    system_paging.first_16mb = first_16mb;
-    system_paging.first_4gb  = first_4gb;
+    last      = &system_paging.pa_sentinel;
+    last_16mb = &system_paging.pa_sentinel;
+    last_4gb  = &system_paging.pa_sentinel;
 
-    system_paging.last      = last;
-    system_paging.last_16mb = last_16mb;
-    system_paging.last_4gb  = last_4gb;
+    system_paging.first      = base->next;
+    system_paging.first_16mb = base->next_16mb;
+    system_paging.first_4gb  = base->next_4gb;
+
+    system_paging.last      = base.last;
+    system_paging.last_16mb = base.last_16mb;
+    system_paging.last_4gb  = base.last_4gb;
+
+    system_paging.first_non_16mb = first_non_16mb;
+}
+
+internal Uintptr system_paging_physical_alloc(System_Physical_Page_Kind kind) {
+    // TODO(robin): cache current physical allocator used for better performance
+
+    switch (kind) {
+    case SYSTEM_PHYSICAL_PAGE_NORMAL:
+        System_Physical_Allocator *current = system_paging.first_non_16mb;
+    case SYSTEM_PHYSICAL_PAGE_4GB:
+    case SYSTEM_PHYSICAL_PAGE_16MB:
+    }
 }

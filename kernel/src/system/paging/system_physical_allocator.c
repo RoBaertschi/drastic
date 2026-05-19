@@ -74,6 +74,8 @@ internal System_Physical_Allocator *system_pa_init(void *address, Uintptr addres
 
     pa->stack_top = i-1;
 
+    pa->pages_bitmap &= ((U64)1 << metadata_pages) - 1;
+
     return address;
 }
 
@@ -123,7 +125,7 @@ internal bool system_pa_is_free(System_Physical_Allocator *pa, Uintptr address) 
 
 internal void system_pa_free(System_Physical_Allocator *pa, Uintptr address) {
     kassert(!system_pa_is_free(pa, address));
-    kassert(pa->stack_top+1 < pa->size);
+    kassert(pa->stack_top+1 <  pa->size);
     kassert(pa->stack_top   >= -1);
 
     pa->stack_top                  += 1;

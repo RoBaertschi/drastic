@@ -231,3 +231,35 @@ internal void system_paging_physical_free(Uintptr address) {
     printf("PAGING: could not free physical address at %p\n", (void*)address);
     kpanic(STR("PAGING: invalid physical page free"));
 }
+
+#define SYSTEM_PAGING_FLAG_P    (U64)BIT(0)  // present
+#define SYSTEM_PAGING_FLAG_RW   (U64)BIT(1)  // Read/Write
+#define SYSTEM_PAGING_FLAG_US   (U64)BIT(2)  // User/Supervisor
+#define SYSTEM_PAGING_FLAG_PWT  (U64)BIT(3)  // Write-Through
+#define SYSTEM_PAGING_FLAG_PCD  (U64)BIT(4)  // Cache Disable
+#define SYSTEM_PAGING_FLAG_A    (U64)BIT(5)  // Accessed
+#define SYSTEM_PAGING_FLAG_AVL1 (U64)BIT(6)  // Available bit 1
+#define SYSTEM_PAGING_FLAG_PS   (U64)BIT(7) // Reserved
+#define SYSTEM_PAGING_FLAG_AVL2 (U64)BIT(8)  // Available bit 2
+#define SYSTEM_PAGING_FLAG_AVL3 (U64)BIT(9)  // Available bit 3
+#define SYSTEM_PAGING_FLAG_AVL4 (U64)BIT(10) // Available bit 4
+
+#define SYSTEM_PAGING_FLAG_XD (U64)BIT(63) // Execute Disable
+
+#define SYSTEM_PAGING_FLAG_ADDRESS ((((U64)1 << 48) -1) & ~(((U64)1 << 12) - 1))
+
+USED
+internal void system_paging_pml4_entry(U64 *target, void *target_address, U64 flags) {
+    // PS is not supported on a pml4
+    kassert(!(flags & SYSTEM_PAGING_FLAG_PS));
+
+    *target = (((U64)(Uintptr)target_address) & SYSTEM_PAGING_FLAG_ADDRESS) | flags;
+}
+
+internal void system_paging_pdpt_entry(U64 *target, void *target_address, U64 flags) {
+    *target = (((U64)(Uintptr)target_address) & SYSTEM_PAGING_FLAG_ADDRESS) | flags;
+}
+
+internal void system_paging_pd_entry(U64 *target, void *target_address, U64 flags) {
+    *target = (((U64)(Uintptr)target_address) & SYSTEM_PAGING_FLAG_ADDRESS) | flags;
+}

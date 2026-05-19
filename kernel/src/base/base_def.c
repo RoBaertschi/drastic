@@ -30,6 +30,7 @@ typedef intptr_t  Intptr;
 #define USED __attribute__((used))
 #define PACKED __attribute__((packed))
 #define COLD __attribute__((cold))
+#define fallthrough __attribute__((fallthrough))
 #define LIMINE_REQUEST USED SECTION(".limine_requests")
 
 #define size_of(T) ((Int)sizeof(T))
@@ -44,3 +45,8 @@ internal void kassert_message(bool assertion, char const *message);
 #define MB(num) (KB(num) * (U64)1024)
 #define GB(num) (MB(num) * (U64)1024)
 #define TB(num) (GB(num) * (U64)1024)
+
+#define SL_APPEND_BASE(last, next, current) do {\
+    (last)->next = (current);\
+    (last)       = (current);\
+} while (0)

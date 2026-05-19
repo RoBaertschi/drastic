@@ -161,10 +161,12 @@ func downloadFromGithub(owner, repo, revision, directory string) downloadTask {
 
 var cflags = []string{
 	"-g",
-	"-O2",
+	// "-O2",
 	"-pipe",
 	"-Wall",
 	"-Wextra",
+	"-Wimplicit-fallthrough=5",
+	"-Wno-unused-function",
 	"-Wconversion",
 	"-std=gnu11",
 	"-nostdinc",
@@ -310,19 +312,22 @@ func linkKernel() bool {
 	ctx, ctxCancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer ctxCancel()
 
-	objectDir := "kernel/bin-x86_64"
+	binDir := "kernel/bin-x86_64"
 
-	err := os.MkdirAll(objectDir, 0o755)
+	err := os.MkdirAll(binDir, 0o755)
 	if err != nil {
 		fmt.Printf("LD: could not create bin directory: %v\n", err)
 	}
 
 	objFs := os.DirFS("kernel/obj-x86_64")
-	objectFiles, err := fs.Glob(objFs, "**/*.o")
+	objectFiles, err := fs.Glob(objFs, "*/*.o")
 	if err != nil {
 		fmt.Printf("LD: could not find object files: %v\n", err)
 		return false
 	}
+
+	// HACK: go does not support double ** and I don't want to implement it right now
+	objectFiles = append(objectFiles, "main.c.o")
 
 	for i, objectFile := range objectFiles {
 		objectFiles[i] = filepath.Join("obj-x86_64", objectFile)
@@ -482,7 +487,7 @@ func createImage() bool {
 	return true
 }
 
-func runQemu() {
+func runQemu(debug bool) {
 	qemuCommand := exec.Command(
 		"qemu-system-x86_64",
 		"-M", "q35",
@@ -490,6 +495,10 @@ func runQemu() {
 		"-cdrom", "drastic.iso",
 		"-m", "2G", "-serial", "mon:stdio",
 	)
+
+	if debug {
+		qemuCommand.Args = append(qemuCommand.Args, "-s", "-S")
+	}
 
 	qemuCommand.Stdout = os.Stdout
 	qemuCommand.Stderr = os.Stderr
@@ -610,7 +619,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	if len(os.Args) <= 1 || os.Args[1] != "no" {
-		runQemu()
+	if len(os.Args) > 1 {
+		if os.Args[1] == "no" {
+			return
+		} else if os.Args[1] == "d" {
+			runQemu(true)
+		}
+	} else {
+		runQemu(false)
 	}
 }

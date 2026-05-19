@@ -25,6 +25,20 @@ typedef struct System_Physical_Allocator {
     Uintptr address_base;
 } System_Physical_Allocator;
 
+typedef struct System_Pa_Page_Index {
+    Int bitmap_index;
+    Int bit_index;
+} System_Pa_Page_Index;
+
+internal System_Pa_Page_Index system_pa_calculate_page_index(System_Physical_Allocator *pa /* for bounds checking */, Int page) {
+    kassert(0 <= page && page < pa->size);
+
+    return (System_Pa_Page_Index){
+        page % 64,
+        page / 64
+    };
+}
+
 typedef struct System_Pa_Size_Specification {
     Int stack_size;
     Int bitmap_size;
@@ -44,6 +58,13 @@ internal Int system_pa_calculate_required_size(Int page_count) {
 
     System_Pa_Size_Specification spec = system_pa_calculate_size_specification(page_count);
     return size_of(System_Physical_Allocator) + spec.stack_size + spec.bitmap_size;
+}
+
+internal void system_pa_set_used(System_Physical_Allocator *pa, Int page_index) {
+    System_Pa_Page_Index page = system_pa_calculate_page_index(pa, page_index);
+
+    // set page as used
+    pa->pages_bitmap[page.bitmap_index] |= (U64)1 << page.bit_index;
 }
 
 internal System_Physical_Allocator *system_pa_init(void *address, Uintptr address_base, Int metadata_pages, Int page_count) {
@@ -74,23 +95,13 @@ internal System_Physical_Allocator *system_pa_init(void *address, Uintptr addres
 
     pa->stack_top = i-1;
 
-    pa->pages_bitmap &= ((U64)1 << metadata_pages) - 1;
+    for (Int i = 0; i < metadata_pages; i++) {
+        system_pa_set_used(pa, i);
+    }
+
+    pa->address_base = address_base;
 
     return address;
-}
-
-typedef struct System_Pa_Page_Index {
-    Int bitmap_index;
-    Int bit_index;
-} System_Pa_Page_Index;
-
-internal System_Pa_Page_Index system_pa_calculate_page_index(System_Physical_Allocator *pa /* for bounds checking */, Int page) {
-    kassert(0 <= page && page < pa->size);
-
-    return (System_Pa_Page_Index){
-        page % 64,
-        page / 64
-    };
 }
 
 // WARN: Do *NOT* rely on the 0 that is returned when allocation fails, only use the _ok_ parameter
@@ -98,40 +109,46 @@ internal System_Pa_Page_Index system_pa_calculate_page_index(System_Physical_All
 internal Uintptr system_pa_alloc(System_Physical_Allocator *pa, bool *ok) {
     kassert(ok);
 
-    if (pa->stack_top < 0) {
+    if (pa->stack_top < 0 && pa->size <= 0) {
         *ok = false;
         return 0;
     }
 
-    U32 offset                = pa->pages_stack[pa->stack_top];
-    System_Pa_Page_Index page = system_pa_calculate_page_index(pa, (Int)offset);
-
-    // set page as used
-    pa->pages_bitmap[page.bitmap_index] |= (U64)1 << page.bit_index;
+    U32 offset = pa->pages_stack[pa->stack_top];
+    system_pa_set_used(pa, (Int)offset);
 
     pa->stack_top -= 1;
 
     *ok = true;
-    return (Uintptr)offset + pa->address_base;
+    Uintptr address = (Uintptr)(offset * SYSTEM_PAGE_SIZE) + pa->address_base;
+    kassert(pa->address_base <= address && address < pa->address_base + (pa->size * SYSTEM_PAGE_SIZE));
+    return address;
 }
 
 internal bool system_pa_is_free(System_Physical_Allocator *pa, Uintptr address) {
     kassert(pa->address_base <= address && address < pa->address_base + (Uintptr)(pa->size * 4096));
 
-    System_Pa_Page_Index page = system_pa_calculate_page_index(pa, (Int)(address - pa->address_base));
+    Int page_index = (Int)(address - pa->address_base) / SYSTEM_PAGE_SIZE;
+    System_Pa_Page_Index page = system_pa_calculate_page_index(pa, page_index);
 
     return !(pa->pages_bitmap[page.bitmap_index] & ((U64)1 << page.bit_index));
 }
 
 internal void system_pa_free(System_Physical_Allocator *pa, Uintptr address) {
+    printf("1");
     kassert(!system_pa_is_free(pa, address));
+    printf("2");
     kassert(pa->stack_top+1 <  pa->size);
+    printf("3");
     kassert(pa->stack_top   >= -1);
+    printf("4");
+
+    Int page_index = (Int)(address - pa->address_base) / SYSTEM_PAGE_SIZE;
 
     pa->stack_top                  += 1;
-    pa->pages_stack[pa->stack_top]  = (U32)(address - pa->address_base);
+    pa->pages_stack[pa->stack_top]  = (U32)page_index;
 
-    System_Pa_Page_Index page = system_pa_calculate_page_index(pa, (Int)(address - pa->address_base));
+    System_Pa_Page_Index page = system_pa_calculate_page_index(pa, page_index);
 
     pa->pages_bitmap[page.bitmap_index] &= ~((U64)1 << page.bit_index);
 }

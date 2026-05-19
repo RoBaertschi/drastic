@@ -56,6 +56,8 @@ internal bool system_paging_pa_is_sentinel(
     return pa == pa->next;
 }
 
+// WARN: to avoid regression:
+//       do not append the sentinel at the end, it is already set and would break.
 internal void system_paging_setup(U64 stack_top) {
     kassert(system_paging_memmap_request.response != NULL);
 
@@ -65,10 +67,6 @@ internal void system_paging_setup(U64 stack_top) {
     system_paging.pa_sentinel.next      = &system_paging.pa_sentinel;
     system_paging.pa_sentinel.next_16mb = &system_paging.pa_sentinel;
     system_paging.pa_sentinel.next_4gb  = &system_paging.pa_sentinel;
-
-    struct System_Physical_Allocator *first      = &base;
-    struct System_Physical_Allocator *first_16mb = &base;
-    struct System_Physical_Allocator *first_4gb  = &base;
 
     struct System_Physical_Allocator *last      = &base;
     struct System_Physical_Allocator *last_16mb = &base;
@@ -105,29 +103,32 @@ internal void system_paging_setup(U64 stack_top) {
                     required_pages,
                     (Int)(entry->length / SYSTEM_PAGE_SIZE));
 
-            last->next = current;
-            last       = current;
+            current->next      = &system_paging.pa_sentinel;
+            current->next_16mb = &system_paging.pa_sentinel;
+            current->next_4gb  = &system_paging.pa_sentinel;
+
+            SL_APPEND_BASE(last, next, current);
+
+            if (entry->base < MB(16) && entry->base + entry->length < MB(16)) {
+                SL_APPEND_BASE(last_16mb, next_16mb, current);
+            } else if (system_paging_pa_is_sentinel(first_non_16mb)) {
+                first_non_16mb = current;
+            }
+
+            if (entry->base < GB(4) && entry->base + entry->length < GB(4)) {
+                SL_APPEND_BASE(last_4gb, next_4gb, current);
+            }
+
 
             printf("MEMMAP:  -> initialized physical allocator with size %i\n", current->size);
         }
 
         if (entry->base < MB(16) && entry->base + entry->length < MB(16)) {
             printf("MEMMAP:  -> 16 MB Zone\n");
-            if (entry->type == LIMINE_MEMMAP_USABLE) {
-                last_16mb->next_16mb = current;
-                last_16mb            = current;
-            }
-        } else if (system_paging_pa_is_sentinel(first_non_16mb)
-                && entry->type == LIMINE_MEMMAP_USABLE) {
-            first_non_16mb = current;
         }
 
         if (entry->base < GB(4) && entry->base + entry->length < GB(4)) {
             printf("MEMMAP:  -> 4 GB Zone\n");
-            if (entry->type == LIMINE_MEMMAP_USABLE) {
-                last_4gb->next_4gb = current;
-                last_4gb           = current;
-            }
         }
 
         if (entry->base <= system_paging_exe_addr_request.response->physical_base
@@ -147,28 +148,86 @@ internal void system_paging_setup(U64 stack_top) {
         }
     }
 
-    last      = &system_paging.pa_sentinel;
-    last_16mb = &system_paging.pa_sentinel;
-    last_4gb  = &system_paging.pa_sentinel;
+    system_paging.first      = base.next;
+    system_paging.first_16mb = base.next_16mb;
+    system_paging.first_4gb  = base.next_4gb;
 
-    system_paging.first      = base->next;
-    system_paging.first_16mb = base->next_16mb;
-    system_paging.first_4gb  = base->next_4gb;
-
-    system_paging.last      = base.last;
-    system_paging.last_16mb = base.last_16mb;
-    system_paging.last_4gb  = base.last_4gb;
+    system_paging.last      = last;
+    system_paging.last_16mb = last_16mb;
+    system_paging.last_4gb  = last_4gb;
 
     system_paging.first_non_16mb = first_non_16mb;
 }
 
-internal Uintptr system_paging_physical_alloc(System_Physical_Page_Kind kind) {
+USED
+internal Uintptr system_paging_physical_alloc(System_Physical_Page_Kind kind, bool *ok) {
+    // TODO(robin): benchmark
+
+    kassert(ok);
     // TODO(robin): cache current physical allocator used for better performance
+
 
     switch (kind) {
     case SYSTEM_PHYSICAL_PAGE_NORMAL:
-        System_Physical_Allocator *current = system_paging.first_non_16mb;
-    case SYSTEM_PHYSICAL_PAGE_4GB:
+        for (System_Physical_Allocator *current = system_paging.first_non_16mb;
+                !system_paging_pa_is_sentinel(current);
+                current = current->next) {
+
+            Uintptr result = system_pa_alloc(current, ok);
+            if (*ok) {
+                return result;
+            }
+        }
+
+        // try 16mb parts, TODO(robin): log
+        fallthrough;
     case SYSTEM_PHYSICAL_PAGE_16MB:
+        for (System_Physical_Allocator *current = system_paging.first_16mb;
+                !system_paging_pa_is_sentinel(current);
+                current = current->next_16mb) {
+
+            Uintptr result = system_pa_alloc(current, ok);
+            if (*ok) {
+                return result;
+            }
+        }
+        break;
+
+    case SYSTEM_PHYSICAL_PAGE_4GB:
+        for (System_Physical_Allocator *current = system_paging.first_4gb;
+                !system_paging_pa_is_sentinel(current);
+                current = current->next_4gb) {
+
+            Uintptr result = system_pa_alloc(current, ok);
+            if (*ok) {
+                return result;
+            }
+        }
+        break;
     }
+
+    *ok = false;
+    return 0;
+}
+
+internal void system_paging_physical_free(Uintptr address) {
+    // TODO(robin): benchmark
+
+    // TODO(robin): do binary search to find correct physical allocator faster
+    //              or support some better way to find it
+
+    for (System_Physical_Allocator *current = system_paging.first;
+            !system_paging_pa_is_sentinel(current);
+            current = current->next) {
+
+        Uintptr address_base = current->address_base;
+
+        if (address_base <= address && address < address_base + (current->size * SYSTEM_PAGE_SIZE)) {
+            system_pa_free(current, address);
+            return;
+        }
+    }
+
+    printf("PAGING: could not free physical address at %p\n", (void*)address);
+    kpanic(STR("PAGING: invalid physical page free"));
 }

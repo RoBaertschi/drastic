@@ -109,7 +109,7 @@ internal System_Physical_Allocator *system_pa_init(void *address, Uintptr addres
 internal Uintptr system_pa_alloc(System_Physical_Allocator *pa, bool *ok) {
     kassert(ok);
 
-    if (pa->stack_top < 0 && pa->size <= 0) {
+    if (pa->stack_top < 0 || pa->size <= 0) {
         *ok = false;
         return 0;
     }
@@ -121,12 +121,12 @@ internal Uintptr system_pa_alloc(System_Physical_Allocator *pa, bool *ok) {
 
     *ok = true;
     Uintptr address = (Uintptr)(offset * SYSTEM_PAGE_SIZE) + pa->address_base;
-    kassert(pa->address_base <= address && address < pa->address_base + (pa->size * SYSTEM_PAGE_SIZE));
+    kassert(pa->address_base <= address && address < pa->address_base + ((Uintptr)pa->size * SYSTEM_PAGE_SIZE));
     return address;
 }
 
 internal bool system_pa_is_free(System_Physical_Allocator *pa, Uintptr address) {
-    kassert(pa->address_base <= address && address < pa->address_base + (Uintptr)(pa->size * 4096));
+    kassert(pa->address_base <= address && address < pa->address_base + ((Uintptr)pa->size * SYSTEM_PAGE_SIZE));
 
     Int page_index = (Int)(address - pa->address_base) / SYSTEM_PAGE_SIZE;
     System_Pa_Page_Index page = system_pa_calculate_page_index(pa, page_index);

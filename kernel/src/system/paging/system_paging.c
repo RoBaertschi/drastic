@@ -222,7 +222,7 @@ internal void system_paging_physical_free(Uintptr address) {
 
         Uintptr address_base = current->address_base;
 
-        if (address_base <= address && address < address_base + (current->size * SYSTEM_PAGE_SIZE)) {
+        if (address_base <= address && address < address_base + ((Uintptr)current->size * SYSTEM_PAGE_SIZE)) {
             system_pa_free(current, address);
             return;
         }
@@ -232,34 +232,129 @@ internal void system_paging_physical_free(Uintptr address) {
     kpanic(STR("PAGING: invalid physical page free"));
 }
 
-#define SYSTEM_PAGING_FLAG_P    (U64)BIT(0)  // present
-#define SYSTEM_PAGING_FLAG_RW   (U64)BIT(1)  // Read/Write
-#define SYSTEM_PAGING_FLAG_US   (U64)BIT(2)  // User/Supervisor
-#define SYSTEM_PAGING_FLAG_PWT  (U64)BIT(3)  // Write-Through
-#define SYSTEM_PAGING_FLAG_PCD  (U64)BIT(4)  // Cache Disable
-#define SYSTEM_PAGING_FLAG_A    (U64)BIT(5)  // Accessed
-#define SYSTEM_PAGING_FLAG_AVL1 (U64)BIT(6)  // Available bit 1
-#define SYSTEM_PAGING_FLAG_PS   (U64)BIT(7) // Reserved
-#define SYSTEM_PAGING_FLAG_AVL2 (U64)BIT(8)  // Available bit 2
-#define SYSTEM_PAGING_FLAG_AVL3 (U64)BIT(9)  // Available bit 3
-#define SYSTEM_PAGING_FLAG_AVL4 (U64)BIT(10) // Available bit 4
+#define SYSTEM_PAGING_AMD64_FLAG_P    (U64)BIT(0)  // present
+#define SYSTEM_PAGING_AMD64_FLAG_RW   (U64)BIT(1)  // Read/Write
+#define SYSTEM_PAGING_AMD64_FLAG_US   (U64)BIT(2)  // User/Supervisor
+#define SYSTEM_PAGING_AMD64_FLAG_PWT  (U64)BIT(3)  // Write-Through
+#define SYSTEM_PAGING_AMD64_FLAG_PCD  (U64)BIT(4)  // Cache Disable
+#define SYSTEM_PAGING_AMD64_FLAG_A    (U64)BIT(5)  // Accessed
 
-#define SYSTEM_PAGING_FLAG_XD (U64)BIT(63) // Execute Disable
+#define SYSTEM_PAGING_AMD64_FLAG_AVL1 (U64)BIT(6)  // Available bit 1
+#define SYSTEM_PAGING_AMD64_FLAG_D    (U64)BIT(6)  // Dirty
 
-#define SYSTEM_PAGING_FLAG_ADDRESS ((((U64)1 << 48) -1) & ~(((U64)1 << 12) - 1))
+#define SYSTEM_PAGING_AMD64_FLAG_PS   (U64)BIT(7) // Reserved depending on table
+#define SYSTEM_PAGING_AMD64_FLAG_PAT  (U64)BIT(7) // Page Attribute Table
+
+#define SYSTEM_PAGING_AMD64_FLAG_AVL2 (U64)BIT(8)  // Available bit 2
+#define SYSTEM_PAGING_AMD64_FLAG_G    (U64)BIT(8)  // Global
+
+#define SYSTEM_PAGING_AMD64_FLAG_AVL3 (U64)BIT(9)  // Available bit 3
+#define SYSTEM_PAGING_AMD64_FLAG_AVL4 (U64)BIT(10) // Available bit 4
+
+#define SYSTEM_PAGING_AMD64_FLAG_XD (U64)BIT(63) // Execute Disable
+
+#define SYSTEM_PAGING_AMD64_FLAG_ADDRESS ((((U64)1 << 48) -1) & ~(((U64)1 << 12) - 1))
 
 USED
 internal void system_paging_pml4_entry(U64 *target, void *target_address, U64 flags) {
     // PS is not supported on a pml4
-    kassert(!(flags & SYSTEM_PAGING_FLAG_PS));
+    kassert(!(flags & SYSTEM_PAGING_AMD64_FLAG_PS));
 
-    *target = (((U64)(Uintptr)target_address) & SYSTEM_PAGING_FLAG_ADDRESS) | flags;
+    *target = (((U64)(Uintptr)target_address) & SYSTEM_PAGING_AMD64_FLAG_ADDRESS) | flags;
 }
 
 internal void system_paging_pdpt_entry(U64 *target, void *target_address, U64 flags) {
-    *target = (((U64)(Uintptr)target_address) & SYSTEM_PAGING_FLAG_ADDRESS) | flags;
+    *target = (((U64)(Uintptr)target_address) & SYSTEM_PAGING_AMD64_FLAG_ADDRESS) | flags;
 }
 
 internal void system_paging_pd_entry(U64 *target, void *target_address, U64 flags) {
-    *target = (((U64)(Uintptr)target_address) & SYSTEM_PAGING_FLAG_ADDRESS) | flags;
+    *target = (((U64)(Uintptr)target_address) & SYSTEM_PAGING_AMD64_FLAG_ADDRESS) | flags;
+}
+
+internal void system_paging_pt_entry(U64 *target, void *target_address, U64 flags) {
+    *target = (((U64)(Uintptr)target_address) & SYSTEM_PAGING_AMD64_FLAG_ADDRESS) | flags;
+}
+
+#define SYSTEM_PAGING_FLAG_WRITE (U64)BIT(0)
+#define SYSTEM_PAGING_FLAG_EXEC  (U64)BIT(1)
+#define SYSTEM_PAGING_FLAG_USER  (U64)BIT(2)
+
+internal U64 system_paging_amd64_flag_convert(U64 flags) {
+    U64 value = 0;
+
+    if (flags & SYSTEM_PAGING_FLAG_WRITE) {
+        value |= SYSTEM_PAGING_AMD64_FLAG_RW;
+    }
+
+    if (flags & SYSTEM_PAGING_FLAG_USER) {
+        value |= SYSTEM_PAGING_AMD64_FLAG_US;
+    }
+
+    if (!(flags & SYSTEM_PAGING_FLAG_EXEC)) {
+        value |= SYSTEM_PAGING_AMD64_FLAG_XD;
+    }
+
+    return value;
+}
+
+internal Uintptr system_paging_entry__new_physical(U64 hhdm_offset) {
+    bool ok = false;
+    Uintptr new_address = system_paging_physical_alloc(SYSTEM_PHYSICAL_PAGE_NORMAL, &ok);
+
+    if (!ok) {
+        kpanic(STR("PAGING: could not allocate physical page for page mapping"));
+    }
+    zero((void *)(new_address + hhdm_offset), SYSTEM_PAGE_SIZE);
+    return new_address;
+}
+
+#define SYSTEM_PAGING_ASSERT_ADDRESS_ALIGNED(variable) kassert(((variable) & (SYSTEM_PAGE_SIZE - 1)) == 0)
+
+internal U64 *system_paging_entry(void *table, Uintptr virtual) {
+    SYSTEM_PAGING_ASSERT_ADDRESS_ALIGNED(virtual);
+    kassert(table);
+
+    U64 hhdm_offset     = system_hhdm_request.response->offset;
+    U64 parent_flags    = SYSTEM_PAGING_AMD64_FLAG_P | SYSTEM_PAGING_AMD64_FLAG_RW;
+
+    U64 *pml4 = table;
+
+    U64 virtual_address = (U64)virtual;
+    U64 *entry = &pml4[(virtual_address >> 39) & ((1 << 9) - 1)];
+
+    if (!(*entry & SYSTEM_PAGING_AMD64_FLAG_P)) {
+        Uintptr new_address = system_paging_entry__new_physical(hhdm_offset);
+        system_paging_pml4_entry(entry, (void*)new_address, parent_flags);
+    }
+
+    U64 *pdpt       = (U64*)((*entry & SYSTEM_PAGING_AMD64_FLAG_ADDRESS) + hhdm_offset);
+    U64 *pdpt_entry = &pdpt[(virtual_address >> 30) & ((1 << 9) - 1)];
+
+    if (!(*pdpt_entry & SYSTEM_PAGING_AMD64_FLAG_P)) {
+        Uintptr new_address = system_paging_entry__new_physical(hhdm_offset);
+        system_paging_pdpt_entry(pdpt_entry, (void*)new_address, parent_flags);
+    }
+
+    U64 *pd       = (U64*)((*pdpt_entry & SYSTEM_PAGING_AMD64_FLAG_ADDRESS) + hhdm_offset);
+    U64 *pd_entry = &pd[(virtual_address >> 21) & ((1 << 9) - 1)];
+
+    if (!(*pd_entry & SYSTEM_PAGING_AMD64_FLAG_P)) {
+        Uintptr new_address = system_paging_entry__new_physical(hhdm_offset);
+        system_paging_pd_entry(pd_entry, (void*)new_address, parent_flags);
+    }
+
+    U64 *pt       = (U64*)((*pd_entry & SYSTEM_PAGING_AMD64_FLAG_ADDRESS) + hhdm_offset);
+    U64 *pt_entry = &pt[(virtual_address >> 12) & ((1 << 9) - 1)];
+
+    return pt_entry;
+}
+
+internal void system_paging_map(void *table, Uintptr physical, Uintptr virtual, U64 flags) {
+    SYSTEM_PAGING_ASSERT_ADDRESS_ALIGNED(virtual);
+    SYSTEM_PAGING_ASSERT_ADDRESS_ALIGNED(physical);
+
+    U64 converted_flags = system_paging_amd64_flag_convert(flags);
+    U64 *pt_entry = system_paging_entry(table, virtual);
+    system_paging_pt_entry(pt_entry, (void*)physical, converted_flags | SYSTEM_PAGING_AMD64_FLAG_P);
+    asm_invlpg((void*)virtual);
 }

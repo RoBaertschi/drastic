@@ -40,3 +40,7 @@ internal U64 asm_read_msr(U32 msr) {
 
     return (U64)low_eax | ((U64)high_edx << 32);
 }
+
+internal void asm_invlpg(void *ptr) {
+    asm volatile ("invlpg (%0)" :: "r"(ptr) : "memory");
+}

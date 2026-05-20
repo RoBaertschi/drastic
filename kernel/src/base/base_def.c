@@ -23,7 +23,7 @@ typedef intptr_t  Intptr;
 #define internal static
 #define global   static
 
-#define BIT(bit) (1 << (bit))
+#define BIT(bit) ((U64)1 << (bit))
 
 #define NO_RETURN __attribute__ ((noreturn))
 #define SECTION(s) __attribute__((section(s)))

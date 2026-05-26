@@ -1,5 +1,3 @@
-#include "system_physical_allocator.c"
-
 typedef struct System_Paging_Address {
     Uintptr physical;
     Uintptr virtual;
@@ -259,6 +257,14 @@ internal void system_paging_map(System_Paging_Table *table, Uintptr physical, Ui
     U64 *pt_entry       = system_paging_entry(table, virtual);
     system_paging_pt_entry(pt_entry, (void*)physical, converted_flags | SYSTEM_PAGING_AMD64_FLAG_P);
     asm_invlpg((void*)virtual);
+}
+
+internal void system_paging_unmap(System_Paging_Table *table, Uintptr virtual) {
+    SYSTEM_PAGING_ASSERT_ADDRESS_ALIGNED(virtual);
+
+    U64 *pt_entry = system_paging_entry(table, virtual);
+    *pt_entry     = 0;
+    asm_invlpg((void *)virtual);
 }
 
 internal System_Paging_Address system_paging_page_clone(void *page, U64 hhdm_offset) {

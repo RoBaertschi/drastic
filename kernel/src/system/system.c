@@ -8,9 +8,11 @@ static volatile struct limine_hhdm_request system_hhdm_request = {
 
 #include "system_gdt.c"
 #include "system_idt.c"
-#include "paging/system_paging.c"
 #include "system_acpi.c"
 #include "system_apic.c"
+#include "system_physical_allocator.c"
+#include "system_paging.c"
+#include "system_vmm.c"
 
 internal void system_setup(U64 stack_top) {
     asm_disable_interrupts();

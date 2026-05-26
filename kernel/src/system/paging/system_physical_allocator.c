@@ -34,8 +34,8 @@ internal System_Pa_Page_Index system_pa_calculate_page_index(System_Physical_All
     kassert(0 <= page && page < pa->size);
 
     return (System_Pa_Page_Index){
-        page % 64,
-        page / 64
+        page / 64,
+        page % 64
     };
 }
 
@@ -49,7 +49,7 @@ internal System_Pa_Size_Specification system_pa_calculate_size_specification(Int
 
     System_Pa_Size_Specification spec = { 0 };
     spec.stack_size  = page_count * size_of(U32);
-    spec.bitmap_size = page_count / (size_of(U64) * 8) + 1;
+    spec.bitmap_size = ((page_count + (size_of(U64) * 8 - 1)) / (size_of(U64) * 8)) * size_of(U64);
     return spec;
 }
 
@@ -87,13 +87,16 @@ internal System_Physical_Allocator *system_pa_init(void *address, Uintptr addres
 
     pa->size = page_count;
 
-    U32 i = (U32)metadata_pages;
+    Int stack_index = 0;
 
-    for (; i < (U32)page_count; i++) {
-        pa->pages_stack[i] = i;
+    for (U32 i = (U32)metadata_pages;
+        i < (U32)page_count;
+        i++, stack_index++) {
+
+        pa->pages_stack[stack_index] = i;
     }
 
-    pa->stack_top = i-1;
+    pa->stack_top = stack_index - 1;
 
     for (Int i = 0; i < metadata_pages; i++) {
         system_pa_set_used(pa, i);

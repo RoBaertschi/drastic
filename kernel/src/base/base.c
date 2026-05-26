@@ -5,3 +5,4 @@
 #include "base_format.c"
 #include "base_panic.c"
 #include "base_asm.c"
+#include "base_logging.c"

@@ -3,3 +3,4 @@
 *.iso
 *.hdd
 /m
+/qemu-interrupts.log

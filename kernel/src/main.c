@@ -59,6 +59,8 @@ void kmain(void) {
     kpanic_set_output_stream(serial_stream);
     format_set_output_stream(serial_stream);
 
+    LOG_INFO(LOGS_NONE, "hi");
+
     printf("\n\n\n");
 
     printf("frame_ptr = %p\n", frame_ptr);

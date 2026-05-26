@@ -44,3 +44,13 @@ internal U64 asm_read_msr(U32 msr) {
 internal void asm_invlpg(void *ptr) {
     asm volatile ("invlpg (%0)" :: "r"(ptr) : "memory");
 }
+
+internal U64 asm_cr3_read(void) {
+    U64 output = 0;
+    asm volatile ("movq %%cr3, %0" : "=r"(output));
+    return output;
+}
+
+internal void asm_cr3_write(U64 new_value) {
+    asm volatile ("movq %0, %%cr3" :: "r"(new_value) : "memory");
+}

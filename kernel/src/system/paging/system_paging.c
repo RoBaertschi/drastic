@@ -1,5 +1,12 @@
 #include "system_physical_allocator.c"
 
+typedef struct System_Paging_Address {
+    Uintptr physical;
+    Uintptr virtual;
+} System_Paging_Address;
+
+typedef void System_Paging_Table;
+
 LIMINE_REQUEST
 static volatile struct limine_memmap_request system_paging_memmap_request = {
     .id       = LIMINE_MEMMAP_REQUEST_ID,
@@ -54,109 +61,6 @@ internal bool system_paging_pa_is_sentinel(
     struct System_Physical_Allocator *pa) {
 
     return pa == pa->next;
-}
-
-// WARN: to avoid regression:
-//       do not append the sentinel at the end, it is already set and would break.
-internal void system_paging_setup(U64 stack_top) {
-    kassert(system_paging_memmap_request.response != NULL);
-
-    struct System_Physical_Allocator base = { 0 };
-
-    // The sentinel always points to itself
-    system_paging.pa_sentinel.next      = &system_paging.pa_sentinel;
-    system_paging.pa_sentinel.next_16mb = &system_paging.pa_sentinel;
-    system_paging.pa_sentinel.next_4gb  = &system_paging.pa_sentinel;
-
-    struct System_Physical_Allocator *last      = &base;
-    struct System_Physical_Allocator *last_16mb = &base;
-    struct System_Physical_Allocator *last_4gb  = &base;
-
-    struct System_Physical_Allocator *first_non_16mb = &system_paging.pa_sentinel;
-
-    U64 hhdm_offset = system_hhdm_request.response->offset;
-
-    U64 physical_stack_top = stack_top - hhdm_offset;
-
-    for (U64 i = 0; i < system_paging_memmap_request.response->entry_count; i++) {
-        struct limine_memmap_entry *entry =
-            system_paging_memmap_request.response->entries[i];
-
-        struct System_Physical_Allocator *current = NULL;
-
-        printf("MEMMAP: %xU-%xU(%xU) - %s\n", entry->base, entry->base + entry->length, entry->length, system_paging_memmap_string[entry->type]);
-
-        if (entry->type == LIMINE_MEMMAP_USABLE) {
-            if (entry->length <= SYSTEM_PAGE_SIZE) {
-                printf("MEMMAP:  -> skipping to small memory area\n");
-                continue;
-            }
-
-            Int required_length = system_pa_calculate_required_size((Int)entry->length / SYSTEM_PAGE_SIZE);
-            Int required_pages  = required_length / SYSTEM_PAGE_SIZE + 1;
-
-            kassert(entry->length >= (U64)required_length); // TODO(robin): handle really small pages
-
-            current = system_pa_init(
-                    (void *)(Uintptr)(entry->base + hhdm_offset),
-                    (Uintptr)entry->base,
-                    required_pages,
-                    (Int)(entry->length / SYSTEM_PAGE_SIZE));
-
-            current->next      = &system_paging.pa_sentinel;
-            current->next_16mb = &system_paging.pa_sentinel;
-            current->next_4gb  = &system_paging.pa_sentinel;
-
-            SL_APPEND_BASE(last, next, current);
-
-            if (entry->base < MB(16) && entry->base + entry->length < MB(16)) {
-                SL_APPEND_BASE(last_16mb, next_16mb, current);
-            } else if (system_paging_pa_is_sentinel(first_non_16mb)) {
-                first_non_16mb = current;
-            }
-
-            if (entry->base < GB(4) && entry->base + entry->length < GB(4)) {
-                SL_APPEND_BASE(last_4gb, next_4gb, current);
-            }
-
-
-            printf("MEMMAP:  -> initialized physical allocator with size %i\n", current->size);
-        }
-
-        if (entry->base < MB(16) && entry->base + entry->length < MB(16)) {
-            printf("MEMMAP:  -> 16 MB Zone\n");
-        }
-
-        if (entry->base < GB(4) && entry->base + entry->length < GB(4)) {
-            printf("MEMMAP:  -> 4 GB Zone\n");
-        }
-
-        if (entry->base <= system_paging_exe_addr_request.response->physical_base
-                && system_paging_exe_addr_request.response->physical_base < entry->base + entry->length) {
-
-            printf("MEMMAP:  -> executable located here %xU -> %xU\n",
-                    system_paging_exe_addr_request.response->physical_base,
-                    system_paging_exe_addr_request.response->virtual_base);
-        }
-
-        if (entry->base <= physical_stack_top
-                && physical_stack_top < entry->base + entry->length) {
-
-            printf("MEMMAP:  -> stack located here %xU -> %xU\n",
-                    physical_stack_top,
-                    stack_top);
-        }
-    }
-
-    system_paging.first      = base.next;
-    system_paging.first_16mb = base.next_16mb;
-    system_paging.first_4gb  = base.next_4gb;
-
-    system_paging.last      = last;
-    system_paging.last_16mb = last_16mb;
-    system_paging.last_4gb  = last_4gb;
-
-    system_paging.first_non_16mb = first_non_16mb;
 }
 
 USED
@@ -310,15 +214,13 @@ internal Uintptr system_paging_entry__new_physical(U64 hhdm_offset) {
 
 #define SYSTEM_PAGING_ASSERT_ADDRESS_ALIGNED(variable) kassert(((variable) & (SYSTEM_PAGE_SIZE - 1)) == 0)
 
-internal U64 *system_paging_entry(void *table, Uintptr virtual) {
+internal U64 *system_paging_entry(System_Paging_Table *table, Uintptr virtual) {
     SYSTEM_PAGING_ASSERT_ADDRESS_ALIGNED(virtual);
     kassert(table);
 
     U64 hhdm_offset     = system_hhdm_request.response->offset;
     U64 parent_flags    = SYSTEM_PAGING_AMD64_FLAG_P | SYSTEM_PAGING_AMD64_FLAG_RW;
-
-    U64 *pml4 = table;
-
+    U64 *pml4           = table;
     U64 virtual_address = (U64)virtual;
     U64 *entry = &pml4[(virtual_address >> 39) & ((1 << 9) - 1)];
 
@@ -349,12 +251,216 @@ internal U64 *system_paging_entry(void *table, Uintptr virtual) {
     return pt_entry;
 }
 
-internal void system_paging_map(void *table, Uintptr physical, Uintptr virtual, U64 flags) {
+internal void system_paging_map(System_Paging_Table *table, Uintptr physical, Uintptr virtual, U64 flags) {
     SYSTEM_PAGING_ASSERT_ADDRESS_ALIGNED(virtual);
     SYSTEM_PAGING_ASSERT_ADDRESS_ALIGNED(physical);
 
     U64 converted_flags = system_paging_amd64_flag_convert(flags);
-    U64 *pt_entry = system_paging_entry(table, virtual);
+    U64 *pt_entry       = system_paging_entry(table, virtual);
     system_paging_pt_entry(pt_entry, (void*)physical, converted_flags | SYSTEM_PAGING_AMD64_FLAG_P);
     asm_invlpg((void*)virtual);
+}
+
+internal System_Paging_Address system_paging_page_clone(void *page, U64 hhdm_offset) {
+    System_Paging_Address address = { 0 };
+
+    bool ok = false;
+    address.physical = system_paging_physical_alloc(SYSTEM_PHYSICAL_PAGE_NORMAL, &ok);
+    address.virtual  = address.physical + hhdm_offset;
+
+    if (!ok) {
+        kpanic(STR("PAGING: could not allocate physical page for page mapping"));
+    }
+
+    memcpy((void *)(address.virtual), page, SYSTEM_PAGE_SIZE);
+
+    return address;
+}
+
+internal U64 system_paging_table_entry_update_address(U64 entry, U64 new_address) {
+    SYSTEM_PAGING_ASSERT_ADDRESS_ALIGNED(new_address);
+    U64 zeroed  = ~SYSTEM_PAGING_AMD64_FLAG_ADDRESS;
+    entry      &= zeroed;
+    entry      |= new_address & SYSTEM_PAGING_AMD64_FLAG_ADDRESS;
+    return entry;
+}
+
+internal U64 *system_paging_table_page_entry_clone(U64 *entry, U64 hhdm_offset) {
+    U64 old_physical_address = *entry
+        & SYSTEM_PAGING_AMD64_FLAG_ADDRESS;
+    U64 *old = (U64*)(
+        old_physical_address + hhdm_offset
+    );
+    System_Paging_Address new_address = system_paging_page_clone(
+        old, hhdm_offset
+    );
+
+    *entry = system_paging_table_entry_update_address(
+        *entry, (U64)new_address.physical
+    );
+    return (U64 *)(void *)new_address.virtual;
+}
+
+internal System_Paging_Address system_paging_table_clone(System_Paging_Table *table) {
+    U64 hhdm_offset = system_hhdm_request.response->offset;
+
+    System_Paging_Address cloned_table_address = system_paging_page_clone(table, hhdm_offset);
+
+    Int entries_per_page = SYSTEM_PAGE_SIZE / size_of(U64);
+
+    U64 *pml4 = (U64*)cloned_table_address.virtual;
+    for (Int i = 0; i < entries_per_page; i++) {
+        if (!(pml4[i] & SYSTEM_PAGING_AMD64_FLAG_P)) {
+            // Skip pages that are not present
+            continue;
+        }
+
+        U64 *new_pdpt = system_paging_table_page_entry_clone(
+            &pml4[i], hhdm_offset
+        );
+
+        for (Int j = 0; j < entries_per_page; j++) {
+            if (!(new_pdpt[j] & SYSTEM_PAGING_AMD64_FLAG_P)) {
+                // Skip pages that are not present
+                continue;
+            }
+
+            if (new_pdpt[j] & SYSTEM_PAGING_AMD64_FLAG_PS) {
+                continue;
+            }
+
+            U64 *new_pd = system_paging_table_page_entry_clone(
+                &new_pdpt[j], hhdm_offset
+            );
+
+            for (Int k = 0; k < entries_per_page; k++) {
+                if (!(new_pd[k] & SYSTEM_PAGING_AMD64_FLAG_P)) {
+                    // Skip pages that are not present
+                    continue;
+                }
+
+                if (new_pd[k] & SYSTEM_PAGING_AMD64_FLAG_PS) {
+                    continue;
+                }
+
+                system_paging_table_page_entry_clone(
+                    &new_pd[k], hhdm_offset
+                );
+            }
+        }
+    }
+
+    return cloned_table_address;
+}
+
+// WARN: to avoid regression:
+//       do not append the sentinel at the end, it is already set and would break.
+internal void system_paging_setup(U64 stack_top) {
+    kassert(system_paging_memmap_request.response != NULL);
+
+    struct System_Physical_Allocator base = { 0 };
+
+    // The sentinel always points to itself
+    system_paging.pa_sentinel.next      = &system_paging.pa_sentinel;
+    system_paging.pa_sentinel.next_16mb = &system_paging.pa_sentinel;
+    system_paging.pa_sentinel.next_4gb  = &system_paging.pa_sentinel;
+
+    struct System_Physical_Allocator *last      = &base;
+    struct System_Physical_Allocator *last_16mb = &base;
+    struct System_Physical_Allocator *last_4gb  = &base;
+
+    struct System_Physical_Allocator *first_non_16mb = &system_paging.pa_sentinel;
+
+    U64 hhdm_offset = system_hhdm_request.response->offset;
+
+    U64 physical_stack_top = stack_top - hhdm_offset;
+
+    for (U64 i = 0; i < system_paging_memmap_request.response->entry_count; i++) {
+        struct limine_memmap_entry *entry =
+            system_paging_memmap_request.response->entries[i];
+
+        struct System_Physical_Allocator *current = NULL;
+
+        printf("MEMMAP: %xU-%xU(%xU) - %s\n", entry->base, entry->base + entry->length, entry->length, system_paging_memmap_string[entry->type]);
+
+        if (entry->type == LIMINE_MEMMAP_USABLE) {
+            if (entry->length <= SYSTEM_PAGE_SIZE) {
+                printf("MEMMAP:  -> skipping to small memory area\n");
+                continue;
+            }
+
+            Int required_length = system_pa_calculate_required_size((Int)entry->length / SYSTEM_PAGE_SIZE);
+            Int required_pages  = required_length / SYSTEM_PAGE_SIZE + 1;
+
+            kassert(entry->length >= (U64)required_length); // TODO(robin): handle really small pages
+
+            current = system_pa_init(
+                    (void *)(Uintptr)(entry->base + hhdm_offset),
+                    (Uintptr)entry->base,
+                    required_pages,
+                    (Int)(entry->length / SYSTEM_PAGE_SIZE));
+
+            current->next      = &system_paging.pa_sentinel;
+            current->next_16mb = &system_paging.pa_sentinel;
+            current->next_4gb  = &system_paging.pa_sentinel;
+
+            SL_APPEND_BASE(last, next, current);
+
+            if (entry->base < MB(16) && entry->base + entry->length < MB(16)) {
+                SL_APPEND_BASE(last_16mb, next_16mb, current);
+            } else if (system_paging_pa_is_sentinel(first_non_16mb)) {
+                first_non_16mb = current;
+            }
+
+            if (entry->base < GB(4) && entry->base + entry->length < GB(4)) {
+                SL_APPEND_BASE(last_4gb, next_4gb, current);
+            }
+
+
+            printf("MEMMAP:  -> initialized physical allocator with size %i\n", current->size);
+        }
+
+        if (entry->base < MB(16) && entry->base + entry->length < MB(16)) {
+            printf("MEMMAP:  -> 16 MB Zone\n");
+        }
+
+        if (entry->base < GB(4) && entry->base + entry->length < GB(4)) {
+            printf("MEMMAP:  -> 4 GB Zone\n");
+        }
+
+        if (entry->base <= system_paging_exe_addr_request.response->physical_base
+                && system_paging_exe_addr_request.response->physical_base < entry->base + entry->length) {
+
+            printf("MEMMAP:  -> executable located here %xU -> %xU\n",
+                    system_paging_exe_addr_request.response->physical_base,
+                    system_paging_exe_addr_request.response->virtual_base);
+        }
+
+        if (entry->base <= physical_stack_top
+                && physical_stack_top < entry->base + entry->length) {
+
+            printf("MEMMAP:  -> stack located here %xU -> %xU\n",
+                    physical_stack_top,
+                    stack_top);
+        }
+    }
+
+    system_paging.first      = base.next;
+    system_paging.first_16mb = base.next_16mb;
+    system_paging.first_4gb  = base.next_4gb;
+
+    system_paging.last      = last;
+    system_paging.last_16mb = last_16mb;
+    system_paging.last_4gb  = last_4gb;
+
+    system_paging.first_non_16mb = first_non_16mb;
+
+    printf("PAGING: replacing page table\n");
+    System_Paging_Address table = system_paging_table_clone(
+        (void *)(
+            (asm_cr3_read() & SYSTEM_PAGING_AMD64_FLAG_ADDRESS)
+        + hhdm_offset)
+    );
+    asm_cr3_write((U64)table.physical);
+    printf("PAGING: replaced page table\n");
 }

@@ -350,7 +350,7 @@ func linkKernel() bool {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	fmt.Printf("LD %v -> %s\n", objectFiles, binaryFile)
+	fmt.Printf("LD %v -> %s\n", strings.Join(objectFiles, ", "), binaryFile)
 	err = cmd.Run()
 
 	if err != nil {
@@ -494,6 +494,9 @@ func runQemu(debug bool) {
 		"-drive", "if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-x86_64.fd,readonly=on",
 		"-cdrom", "drastic.iso",
 		"-m", "2G", "-serial", "mon:stdio",
+		"-d", "int,cpu_reset",
+		"-D", "qemu-interrupts.log",
+		"-no-reboot", "-no-shutdown",
 	)
 
 	if debug {

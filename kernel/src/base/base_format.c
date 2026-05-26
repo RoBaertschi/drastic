@@ -170,11 +170,15 @@ internal void format_set_output_stream(Stream s) {
     _format_output_stream = s;
 }
 
-internal void printf(char const *format, ...) {
+internal void vprintf(char const *format, va_list args) {
     String format_string = string_from_char(format);
 
+    vformat(_format_output_stream, format_string, args);
+}
+
+internal void printf(char const *format, ...) {
     va_list args;
     va_start(args, format);
-    vformat(_format_output_stream, format_string, args);
+    vprintf(format, args);
     va_end(args);
 }

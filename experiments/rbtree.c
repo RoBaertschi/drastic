@@ -1,9 +1,35 @@
 #include <assert.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
+
+typedef struct Test_Range {
+    uintptr_t start;
+    size_t    len;
+} Test_Range;
+
+int test_range_compare(Test_Range a, Test_Range b) {
+    if (a.start < b.start) {
+        return -1;
+    }
+    if (a.start > b.start) {
+        return 1;
+    }
+    if (a.len < b.len) {
+        return -1;
+    }
+    if (a.len > b.len) {
+        return 1;
+    }
+    return 0;
+}
+
+void test_range_print(Test_Range range) {
+    printf("[0x%" PRIxPTR ", +%zu]", range.start, range.len);
+}
 
 typedef enum RB_Direction {
     RB_LEFT,
@@ -27,7 +53,7 @@ RB_Color rb_color_flip(RB_Color color) {
 }
 
 typedef struct Node {
-    int value;
+    Test_Range range;
     struct Node *children[RB__COUNT];
 } Node;
 
@@ -78,9 +104,9 @@ bool node_has_child(Node *node, RB_Direction direction) {
     return node_get_child(node, direction) != NULL;
 }
 
-Node *node_make(int value, RB_Color color) {
+Node *node_make(Test_Range range, RB_Color color) {
     Node *node = calloc(1, sizeof(*node));
-    node->value = value;
+    node->range = range;
 
     node_set_color(node, color);
 
@@ -161,19 +187,19 @@ Node *rb_insert_fix_up(Node *node, RB_Direction direction) {
     return node;
 }
 
-Node *rb_insert_helper(Node *node, int value) {
+Node *rb_insert_helper(Node *node, Test_Range range) {
     if (node == NULL) {
-        return node_make(value, RBC_RED);
+        return node_make(range, RBC_RED);
     }
 
-    RB_Direction direction = value > node->value;
-    node_set_child(node, direction, rb_insert_helper(node_get_child(node, direction), value));
+    RB_Direction direction = test_range_compare(range, node->range) > 0;
+    node_set_child(node, direction, rb_insert_helper(node_get_child(node, direction), range));
 
     return rb_insert_fix_up(node, direction);
 }
 
-void rb_insert(RB_Tree *tree, int value) {
-    tree->root = rb_insert_helper(tree->root, value);
+void rb_insert(RB_Tree *tree, Test_Range range) {
+    tree->root = rb_insert_helper(tree->root, range);
     node_set_color(tree->root, RBC_BLACK);
 }
 
@@ -224,13 +250,13 @@ Node *rb_delete_fix_up(Node *node, RB_Direction direction, bool *ok) {
     return node;
 }
 
-Node *rb_delete_helper(Node *node, int value, bool *ok) {
+Node *rb_delete_helper(Node *node, Test_Range range, bool *ok) {
     if (node == NULL) {
         *ok = true;
         return node;
     }
 
-    if (node->value == value) {
+    if (test_range_compare(node->range, range) == 0) {
         if (!node_has_child(node, RB_LEFT)
             || !node_has_child(node, RB_RIGHT)) {
 
@@ -257,22 +283,22 @@ Node *rb_delete_helper(Node *node, int value, bool *ok) {
                 temp = node_get_child(temp, RB_RIGHT);
             }
 
-            node->value = temp->value;
-            value = temp->value;
+            node->range = temp->range;
+            range = temp->range;
         }
     }
 
-    RB_Direction direction = value > node->value;
+    RB_Direction direction = test_range_compare(range, node->range) > 0;
     node_set_child(node,
                    direction,
-                   rb_delete_helper(node_get_child(node, direction), value, ok));
+                   rb_delete_helper(node_get_child(node, direction), range, ok));
 
     return *ok ? node : rb_delete_fix_up(node, direction, ok);
 }
 
-void rb_delete(RB_Tree *tree, int value) {
+void rb_delete(RB_Tree *tree, Test_Range range) {
     bool ok = false;
-    tree->root = rb_delete_helper(tree->root, value, &ok);
+    tree->root = rb_delete_helper(tree->root, range, &ok);
     if (tree->root != NULL) {
         node_set_color(tree->root, RBC_BLACK);
     }
@@ -284,7 +310,8 @@ void rb_print_node(Node *node, const char *prefix, bool is_tail) {
     }
 
     printf("%s%s", prefix, is_tail ? "`-- " : "|-- ");
-    printf("%d%c\n", node->value, node_get_color(node) == RBC_RED ? 'R' : 'B');
+    test_range_print(node->range);
+    printf("%c\n", node_get_color(node) == RBC_RED ? 'R' : 'B');
 
     char next_prefix[256];
     snprintf(next_prefix, sizeof(next_prefix), "%s%s", prefix, is_tail ? "    " : "|   ");
@@ -308,7 +335,8 @@ void rb_print(RB_Tree *tree) {
         return;
     }
 
-    printf("%d%c\n", tree->root->value, node_get_color(tree->root) == RBC_RED ? 'R' : 'B');
+    test_range_print(tree->root->range);
+    printf("%c\n", node_get_color(tree->root) == RBC_RED ? 'R' : 'B');
 
     Node *left = node_get_child(tree->root, RB_LEFT);
     Node *right = node_get_child(tree->root, RB_RIGHT);
@@ -341,24 +369,40 @@ void rb_free(RB_Tree *tree) {
 int main(void) {
     RB_Tree tree = { 0 };
 
-    int values[] = { 8, 3, 10, 1, 6, 14, 4, 7, 13 };
+    Test_Range ranges[] = {
+        { .start =  8, .len = 1 },
+        { .start =  3, .len = 1 },
+        { .start = 10, .len = 1 },
+        { .start =  1, .len = 1 },
+        { .start =  6, .len = 1 },
+        { .start = 14, .len = 1 },
+        { .start =  4, .len = 1 },
+        { .start =  7, .len = 1 },
+        { .start = 13, .len = 1 },
+    };
 
-    printf("Insert values:\n");
-    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); ++i) {
-        printf("insert %d\n", values[i]);
-        rb_insert(&tree, values[i]);
+    printf("Insert ranges:\n");
+    for (size_t i = 0; i < sizeof(ranges) / sizeof(ranges[0]); ++i) {
+        printf("insert ");
+        test_range_print(ranges[i]);
+        printf("\n");
+        rb_insert(&tree, ranges[i]);
         rb_print(&tree);
     }
 
     printf("\nTree after inserts:\n");
     rb_print(&tree);
 
-    printf("\nDelete 1:\n");
-    rb_delete(&tree, 1);
+    printf("\nDelete ");
+    test_range_print((Test_Range){ .start = 1, .len = 1 });
+    printf(":\n");
+    rb_delete(&tree, (Test_Range){ .start = 1, .len = 1 });
     rb_print(&tree);
 
-    printf("\nDelete 14:\n");
-    rb_delete(&tree, 14);
+    printf("\nDelete ");
+    test_range_print((Test_Range){ .start = 14, .len = 1 });
+    printf(":\n");
+    rb_delete(&tree, (Test_Range){ .start = 14, .len = 1 });
     rb_print(&tree);
 
     rb_free(&tree);

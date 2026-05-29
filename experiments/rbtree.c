@@ -79,6 +79,8 @@ RB_Color rb_color_flip(RB_Color color) { return color ^ 1; }
 
 typedef struct Node {
     Test_Range  range;
+
+    struct Node *list[RB__COUNT];
     struct Node *children[RB__COUNT];
 } Node;
 
@@ -202,6 +204,27 @@ Node *node_double_rotate(Node *node, RB_Direction direction) {
     return result;
 }
 
+void node_insert(Node *node, Node *anker, RB_Direction direction) {
+    assert(node_valid(node));
+    assert(!node_is_nil(node));
+    assert(node_valid(anker));
+    assert(!node_is_nil(anker));
+
+    RB_Direction flipped = rb_direction_flip(direction);
+
+    node->list[direction]                = anker->list[direction];
+    node->list[flipped]                  = anker;
+    anker->list[direction]               = node;
+    node->list[direction]->list[flipped] = node;
+}
+
+void node_remove_from_list(Node *node) {
+    assert(node_valid(node));
+    assert(!node_is_nil(node));
+    node->list[RB_LEFT]->list[RB_RIGHT] = node->list[RB_RIGHT];
+    node->list[RB_RIGHT]->list[RB_LEFT] = node->list[RB_LEFT];
+}
+
 #define RB_NODES_MAX ((4096 - sizeof(RB_Nodes)) / sizeof(Node))
 
 typedef struct RB_Nodes {
@@ -217,8 +240,10 @@ RB_Nodes *rb_nodes_create(void) {
 
 typedef struct RB_Tree {
     Node *root;
+    Node list;
 
     Node *free_list;
+
 
     RB_Nodes *nodes;
     RB_Nodes *current_node;
@@ -238,6 +263,9 @@ bool rb_tree_init(RB_Tree *tree) {
         return false;
     }
     tree->nodes = tree->current_node = new_nodes;
+
+    tree->list.list[RB_LEFT]  = &tree->list;
+    tree->list.list[RB_RIGHT] = &tree->list;
     return true;
 }
 
@@ -324,6 +352,8 @@ void rb_clear(RB_Tree *tree) {
     assert(rb_tree_valid(tree));
     rb_tree_node_free(tree, tree->root, true);
     tree->root = &node_nil;
+    tree->list.list[RB_LEFT] = &tree->list;
+    tree->list.list[RB_RIGHT] = &tree->list;
 }
 
 typedef enum RB_Insert_Status {
@@ -361,10 +391,16 @@ Node *rb_insert_fix_up(Node *node, RB_Direction direction) {
     return node;
 }
 
-RB_Insert_Result rb_insert_helper(RB_Tree *tree, Node *node, Test_Range range) {
+RB_Insert_Result rb_insert_helper(
+        RB_Tree *tree,
+        Node *node,
+        Test_Range range,
+        Node *list_anker,
+        RB_Direction list_direction) {
     assert(rb_tree_valid(tree));
     assert(node_valid(node));
     assert(test_range_valid(range));
+    assert(node_valid(list_anker));
     if (node_is_nil(node)) {
         Node *new_node = rb_tree_node_make(tree, range, RBC_RED);
         if (new_node == NULL) {
@@ -378,6 +414,7 @@ RB_Insert_Result rb_insert_helper(RB_Tree *tree, Node *node, Test_Range range) {
             .node = new_node,
             .status = RB_INSERT_OK,
         };
+        node_insert(new_node, list_anker, list_direction);
         assert(node_valid(result.node));
         return result;
     }
@@ -396,7 +433,7 @@ RB_Insert_Result rb_insert_helper(RB_Tree *tree, Node *node, Test_Range range) {
     RB_Direction direction = comparison > 0;
 
     RB_Insert_Result result =
-        rb_insert_helper(tree, node_get_child(node, direction), range);
+        rb_insert_helper(tree, node_get_child(node, direction), range, node, direction);
 
     if (result.status == RB_INSERT_OK) {
         node_set_child(node, direction, result.node);
@@ -412,7 +449,7 @@ RB_Insert_Status rb_insert(RB_Tree *tree, Test_Range range) {
     assert(rb_tree_valid(tree));
     assert(test_range_valid(range));
 
-    RB_Insert_Result result = rb_insert_helper(tree, tree->root, range);
+    RB_Insert_Result result = rb_insert_helper(tree, tree->root, range, &tree->list, RB_RIGHT);
     tree->root = result.node;
 
     if (result.status == RB_INSERT_OK) {
@@ -516,6 +553,7 @@ RB_Delete_Result rb_delete_helper(RB_Tree *tree, Node *node, Test_Range range) {
                 node_set_color(temp, RBC_BLACK);
                 result.status = RB_DELETE_OK;
             }
+            node_remove_from_list(node);
             rb_tree_node_free(tree, node, false);
 
             result.node = temp;
@@ -527,6 +565,7 @@ RB_Delete_Result rb_delete_helper(RB_Tree *tree, Node *node, Test_Range range) {
                 temp = node_get_child(temp, RB_RIGHT);
             }
 
+            assert(temp->list[RB_RIGHT] == node);
             node->range = temp->range;
             range = temp->range;
         }
@@ -560,7 +599,7 @@ void rb_delete(RB_Tree *tree, Test_Range range) {
     }
 }
 
-Node *rb_find_prev_by_start(RT_Tree *tree, uintptr_t start) {
+Node *rb_find_prev_by_start(RB_Tree *tree, uintptr_t start) {
     assert(rb_tree_valid(tree));
 
     Node *node = tree->root;
@@ -580,7 +619,7 @@ Node *rb_find_prev_by_start(RT_Tree *tree, uintptr_t start) {
     return best;
 }
 
-Node *rb_find_next_by_start(RT_Tree *tree, uintptr_t start) {
+Node *rb_find_next_by_start(RB_Tree *tree, uintptr_t start) {
     assert(rb_tree_valid(tree));
 
     Node *node = tree->root;
@@ -598,6 +637,35 @@ Node *rb_find_next_by_start(RT_Tree *tree, uintptr_t start) {
 
     assert(node_valid(best));
     return best;
+}
+
+void rb_list_validate(RB_Tree *tree) {
+    assert(rb_tree_valid(tree));
+
+    Node *sentinel = &tree->list;
+    assert(node_valid(sentinel));
+    assert(sentinel->list[RB_LEFT] != NULL);
+    assert(sentinel->list[RB_RIGHT] != NULL);
+    assert(sentinel->list[RB_LEFT]->list[RB_RIGHT] == sentinel);
+    assert(sentinel->list[RB_RIGHT]->list[RB_LEFT] == sentinel);
+
+    Node *previous = sentinel;
+    for (Node *node = sentinel->list[RB_RIGHT];
+            node != sentinel;
+            node = node->list[RB_RIGHT]) {
+        assert(node_valid(node));
+        assert(!node_is_nil(node));
+        assert(node->list[RB_LEFT] == previous);
+        assert(node->list[RB_RIGHT] != NULL);
+
+        if (previous != sentinel) {
+            assert(test_range_compare(previous->range, node->range) < 0);
+        }
+
+        previous = node;
+    }
+
+    assert(previous == sentinel->list[RB_LEFT]);
 }
 
 // --- TESTING CODE ---
@@ -650,9 +718,25 @@ void rb_print(RB_Tree *tree) {
     }
 }
 
+void rb_list_print(RB_Tree *tree) {
+    printf("list:");
+
+    Node *sentinel = &tree->list;
+    for (Node *node = sentinel->list[RB_RIGHT];
+            node != sentinel;
+            node = node->list[RB_RIGHT]) {
+        printf(" ");
+        test_range_print(node->range);
+    }
+
+    printf("\n");
+}
+
 int main(void) {
     RB_Tree tree = {0};
     assert(rb_tree_init(&tree));
+    rb_list_validate(&tree);
+    rb_list_print(&tree);
 
     Test_Range ranges[] = {
         {.start = 8, .len = 1}, {.start = 3, .len = 1}, {.start = 10, .len = 1},
@@ -666,23 +750,38 @@ int main(void) {
         test_range_print(ranges[i]);
         printf("\n");
         rb_insert(&tree, ranges[i]);
+        rb_list_validate(&tree);
         rb_print(&tree);
+        rb_list_print(&tree);
     }
 
     printf("\nTree after inserts:\n");
     rb_print(&tree);
+    rb_list_print(&tree);
 
     printf("\nDelete ");
     test_range_print((Test_Range){.start = 1, .len = 1});
     printf(":\n");
     rb_delete(&tree, (Test_Range){.start = 1, .len = 1});
+    rb_list_validate(&tree);
     rb_print(&tree);
+    rb_list_print(&tree);
 
     printf("\nDelete ");
     test_range_print((Test_Range){.start = 14, .len = 1});
     printf(":\n");
     rb_delete(&tree, (Test_Range){.start = 14, .len = 1});
+    rb_list_validate(&tree);
     rb_print(&tree);
+    rb_list_print(&tree);
+
+    printf("\nDelete ");
+    test_range_print((Test_Range){.start = 8, .len = 1});
+    printf(":\n");
+    rb_delete(&tree, (Test_Range){.start = 8, .len = 1});
+    rb_list_validate(&tree);
+    rb_print(&tree);
+    rb_list_print(&tree);
 
     rb_destroy(&tree);
 

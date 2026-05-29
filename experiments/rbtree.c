@@ -225,7 +225,8 @@ typedef struct RB_Tree {
 } RB_Tree;
 
 bool rb_tree_valid(RB_Tree *tree) {
-    return tree->root != NULL
+    return tree != NULL
+           && node_valid(tree->root)
            && tree->nodes != NULL
            && tree->current_node != NULL;
 }
@@ -294,7 +295,14 @@ void rb_tree_node_free(RB_Tree *tree, Node *node, bool recurse) {
 }
 
 void rb_destroy(RB_Tree *tree) {
-    assert(rb_tree_valid(tree));
+    if (tree == NULL) {
+        return;
+    }
+
+    if (!rb_tree_valid(tree)) {
+        *tree = (RB_Tree){ 0 };
+        return;
+    }
 
     RB_Nodes *current  = tree->nodes;
     RB_Nodes *previous = NULL;

@@ -71,38 +71,56 @@ typedef struct Node {
     struct Node *children[RB__COUNT];
 } Node;
 
+Node node_nil = {
+    .children = { &node_nil, &node_nil },
+};
+
 Node *node_get(Node *node) {
     return (Node *)(((uintptr_t)node) & ~(uintptr_t)1);
+}
+
+bool node_valid(Node *node) {
+    return node != NULL && node_get(node) == node;
+}
+
+bool node_is_nil(Node *node) {
+    assert(node_valid(node));
+    return node == &node_nil;
 }
 
 #define NODE_PTR_MASK ~(uintptr_t)1
 
 RB_Color node_get_color(Node *node) {
+    assert(node_valid(node));
+    assert(!node_is_nil(node));
     return (uintptr_t)node->children[RB_COLOR_DIRECTION] & (uintptr_t)1;
 }
 
 void node_set_color(Node *node, RB_Color color) {
+    assert(node_valid(node));
+    assert(!node_is_nil(node));
     node->children[RB_COLOR_DIRECTION] =
         (Node *)(((uintptr_t)node->children[RB_COLOR_DIRECTION] & NODE_PTR_MASK) |
                 (uintptr_t)color);
 }
 
 Node *node_get_child(Node *node, RB_Direction direction) {
+    assert(node_valid(node));
+    assert(!node_is_nil(node));
     Node *child = node->children[direction];
 
-    if (!child) {
-        return NULL;
-    }
-
     if (direction == RB_COLOR_DIRECTION) {
-        child = (Node *)(((uintptr_t)child) & NODE_PTR_MASK);
+        child = node_get(child);
     }
 
+    assert(node_valid(child));
     return child;
 }
 
 void node_set_child(Node *node, RB_Direction direction, Node *child) {
-    child = node_get(child);
+    assert(node_valid(node));
+    assert(node_valid(child));
+    assert(!node_is_nil(node));
 
     if (direction == RB_COLOR_DIRECTION) {
         child = (Node *)((uintptr_t)child | node_get_color(node));
@@ -112,12 +130,16 @@ void node_set_child(Node *node, RB_Direction direction, Node *child) {
 }
 
 bool node_has_child(Node *node, RB_Direction direction) {
-    return node_get_child(node, direction) != NULL;
+    assert(!node_is_nil(node));
+    return !node_is_nil(node_get_child(node, direction));
 }
 
 Node *node_make(Test_Range range, RB_Color color) {
     Node *node = calloc(1, sizeof(*node));
+    assert(node == NULL || (((uintptr_t)node) & (sizeof(uintptr_t) - 1)) == 0);
     node->range = range;
+    node->children[RB_LEFT] = &node_nil;
+    node->children[RB_RIGHT] = &node_nil;
 
     node_set_color(node, color);
 
@@ -125,33 +147,37 @@ Node *node_make(Test_Range range, RB_Color color) {
 }
 
 bool node_red(Node *node) {
-    if (!node) {
+    if (node_is_nil(node)) {
         return false;
     }
     return node_get_color(node) == RBC_RED;
 }
 
 bool node_child_red(Node *node, RB_Direction direction) {
+    assert(!node_is_nil(node));
     return node_red(node_get_child(node, direction));
 }
 
 void node_color_flip(Node *node) {
-    assert(node);
+    assert(!node_is_nil(node));
     node_set_color(node, node_get_color(node) ^ 1);
 
     Node *left = node_get_child(node, RB_LEFT);
-    if (left) {
+    if (!node_is_nil(left)) {
         node_set_color(left, node_get_color(left) ^ 1);
     }
 
     Node *right = node_get_child(node, RB_RIGHT);
-    if (right) {
+    if (!node_is_nil(right)) {
         node_set_color(right, node_get_color(right) ^ 1);
     }
 }
 
 Node *node_rotate(Node *node, RB_Direction direction) {
+    assert(!node_is_nil(node));
     Node *temp = node_get_child(node, rb_direction_flip(direction));
+    assert(!node_is_nil(temp));
+
     node_set_child(node, rb_direction_flip(direction),
             node_get_child(temp, direction));
     node_set_child(temp, direction, node);
@@ -159,20 +185,30 @@ Node *node_rotate(Node *node, RB_Direction direction) {
     node_set_color(temp, node_get_color(node));
     node_set_color(node, RBC_RED);
 
+    assert(node_valid(temp));
     return temp;
 }
 
 Node *node_double_rotate(Node *node, RB_Direction direction) {
+    assert(!node_is_nil(node));
+    assert(!node_is_nil(node_get_child(node, rb_direction_flip(direction))));
+
     node_set_child(node, rb_direction_flip(direction),
             node_rotate(node_get_child(node, rb_direction_flip(direction)),
                 rb_direction_flip(direction)));
 
-    return node_rotate(node, direction);
+    Node *result = node_rotate(node, direction);
+    assert(node_valid(result));
+    return result;
 }
 
 typedef struct RB_Tree {
     Node *root;
 } RB_Tree;
+
+void rb_tree_init(RB_Tree *tree) {
+    tree->root = &node_nil;
+}
 
 typedef enum RB_Insert_Status {
     RB_INSERT_OK,
@@ -185,6 +221,8 @@ typedef struct RB_Insert_Result {
 } RB_Insert_Result;
 
 Node *rb_insert_fix_up(Node *node, RB_Direction direction) {
+    assert(!node_is_nil(node));
+
     if (node_child_red(node, direction)) {
         Node *dir_child = node_get_child(node, direction);
 
@@ -202,22 +240,27 @@ Node *rb_insert_fix_up(Node *node, RB_Direction direction) {
         }
     }
 
+    assert(node_valid(node));
     return node;
 }
 
 RB_Insert_Result rb_insert_helper(Node *node, Test_Range range) {
-    if (node == NULL) {
-        return (RB_Insert_Result){
+    if (node_is_nil(node)) {
+        RB_Insert_Result result = {
             .node = node_make(range, RBC_RED),
             .status = RB_INSERT_OK,
         };
+        assert(node_valid(result.node));
+        return result;
     }
 
     if (test_range_overlap(range, node->range)) {
-        return (RB_Insert_Result){
+        RB_Insert_Result result = {
             .node = node,
             .status = RB_INSERT_OVERLAP,
         };
+        assert(node_valid(result.node));
+        return result;
     }
 
     int comparison = test_range_compare(range, node->range);
@@ -233,6 +276,7 @@ RB_Insert_Result rb_insert_helper(Node *node, Test_Range range) {
     }
 
     result.node = node;
+    assert(node_valid(result.node));
     return result;
 }
 
@@ -250,6 +294,8 @@ RB_Insert_Status rb_insert(RB_Tree *tree, Test_Range range) {
 }
 
 Node *rb_delete_fix_up(Node *node, RB_Direction direction, bool *ok) {
+    assert(!node_is_nil(node));
+
     Node *parent = node;
     Node *sibling = node_get_child(node, rb_direction_flip(direction));
 
@@ -258,7 +304,7 @@ Node *rb_delete_fix_up(Node *node, RB_Direction direction, bool *ok) {
         sibling = node_get_child(parent, rb_direction_flip(direction));
     }
 
-    if (sibling) {
+    if (!node_is_nil(sibling)) {
         if (!node_child_red(sibling, RB_LEFT) &&
                 !node_child_red(sibling, RB_RIGHT)) {
             if (node_red(parent)) {
@@ -291,19 +337,22 @@ Node *rb_delete_fix_up(Node *node, RB_Direction direction, bool *ok) {
         }
     }
 
+    assert(node_valid(node));
     return node;
 }
 
 Node *rb_delete_helper(Node *node, Test_Range range, bool *ok) {
-    if (node == NULL) {
+    if (node_is_nil(node)) {
         *ok = true;
+        assert(node_valid(node));
         return node;
     }
+    assert(!node_is_nil(node));
 
     if (test_range_compare(node->range, range) == 0) {
         if (!node_has_child(node, RB_LEFT) || !node_has_child(node, RB_RIGHT)) {
 
-            Node *temp = NULL;
+            Node *temp = &node_nil;
             if (node_has_child(node, RB_LEFT)) {
                 temp = node_get_child(node, RB_LEFT);
             }
@@ -319,6 +368,7 @@ Node *rb_delete_helper(Node *node, Test_Range range, bool *ok) {
             }
             free(node);
 
+            assert(node_valid(temp));
             return temp;
         } else {
             Node *temp = node_get_child(node, RB_LEFT);
@@ -335,19 +385,21 @@ Node *rb_delete_helper(Node *node, Test_Range range, bool *ok) {
     node_set_child(node, direction,
             rb_delete_helper(node_get_child(node, direction), range, ok));
 
-    return *ok ? node : rb_delete_fix_up(node, direction, ok);
+    Node *result = *ok ? node : rb_delete_fix_up(node, direction, ok);
+    assert(node_valid(result));
+    return result;
 }
 
 void rb_delete(RB_Tree *tree, Test_Range range) {
     bool ok = false;
     tree->root = rb_delete_helper(tree->root, range, &ok);
-    if (tree->root != NULL) {
+    if (!node_is_nil(tree->root)) {
         node_set_color(tree->root, RBC_BLACK);
     }
 }
 
 void rb_print_node(Node *node, const char *prefix, bool is_tail) {
-    if (!node) {
+    if (node_is_nil(node)) {
         return;
     }
 
@@ -362,18 +414,18 @@ void rb_print_node(Node *node, const char *prefix, bool is_tail) {
     Node *left = node_get_child(node, RB_LEFT);
     Node *right = node_get_child(node, RB_RIGHT);
 
-    if (left && right) {
+    if (!node_is_nil(left) && !node_is_nil(right)) {
         rb_print_node(left, next_prefix, false);
         rb_print_node(right, next_prefix, true);
-    } else if (left) {
+    } else if (!node_is_nil(left)) {
         rb_print_node(left, next_prefix, true);
-    } else if (right) {
+    } else if (!node_is_nil(right)) {
         rb_print_node(right, next_prefix, true);
     }
 }
 
 void rb_print(RB_Tree *tree) {
-    if (!tree->root) {
+    if (node_is_nil(tree->root)) {
         printf("(empty)\n");
         return;
     }
@@ -384,18 +436,18 @@ void rb_print(RB_Tree *tree) {
     Node *left = node_get_child(tree->root, RB_LEFT);
     Node *right = node_get_child(tree->root, RB_RIGHT);
 
-    if (left && right) {
+    if (!node_is_nil(left) && !node_is_nil(right)) {
         rb_print_node(left, "", false);
         rb_print_node(right, "", true);
-    } else if (left) {
+    } else if (!node_is_nil(left)) {
         rb_print_node(left, "", true);
-    } else if (right) {
+    } else if (!node_is_nil(right)) {
         rb_print_node(right, "", true);
     }
 }
 
 void rb_free_node(Node *node) {
-    if (!node) {
+    if (node_is_nil(node)) {
         return;
     }
 
@@ -406,11 +458,12 @@ void rb_free_node(Node *node) {
 
 void rb_free(RB_Tree *tree) {
     rb_free_node(tree->root);
-    tree->root = NULL;
+    tree->root = &node_nil;
 }
 
 int main(void) {
     RB_Tree tree = {0};
+    rb_tree_init(&tree);
 
     Test_Range ranges[] = {
         {.start = 8, .len = 1}, {.start = 3, .len = 1}, {.start = 10, .len = 1},
